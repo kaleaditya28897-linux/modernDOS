@@ -63,3 +63,6 @@ kernel/exeflat.rsp
 test/*.img
 test/fdconfig.sys
 test/result.txt
+
+# MDVMM build output
+mdvmm/build/

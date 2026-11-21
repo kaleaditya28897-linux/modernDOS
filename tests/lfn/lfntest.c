@@ -560,8 +560,12 @@ static void finish(void)
     ;
 }
 
-int main(void)
+/* LFNTEST      run as the shell: also run DJTEST, write RESULT.TXT, power off
+   LFNTEST /T   run as a normal program: exit code 0 = passed */
+int main(int argc, char **argv)
 {
+  int program = argc > 1 && (argv[1][1] == 'T' || argv[1][1] == 't');
+
   out("\nmodernDOS LFN test\n");
   t_volume();
   t_linux_file();
@@ -572,6 +576,15 @@ int main(void)
   t_misc();
   t_keep();
   lfn_chdir("A:\\");
+  if (program)
+  {
+    out(failures ? "RESULT: FAILED " : "RESULT: PASSED ");
+    outhex(failures);
+    out(" failures / ");
+    outhex(checks);
+    out(" checks\n");
+    return failures ? 1 : 0;
+  }
   t_djgpp();
   finish();
   return 0;

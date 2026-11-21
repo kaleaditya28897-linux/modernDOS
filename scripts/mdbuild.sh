@@ -1,7 +1,8 @@
 #!/bin/sh
 # Build the modernDOS kernel inside the build container.
 #   scripts/mdbuild.sh [gcc|wc|all]     (default: all)
-# Output: _output/gcc/kgc8632.sys, _output/wc/kwc8632.sys (+ .map, country.sys)
+# Output: _output/gcc/kgc8632.sys, _output/wc/kwc8632.sys (+ .map, country.sys),
+#         mdvmm/build/MDVMM.COM
 . "$(dirname "$0")/mdenv.sh"
 WHICH=${1:-all}
 md_run sh -c '
@@ -21,5 +22,6 @@ md_run sh -c '
     export PATH=/src/bin:$PATH:$WATCOM/binl64
     build owlinux wc kwc ;;
   esac
-  ls -l _output/*/k*.sys
+  make -s -C mdvmm
+  ls -l _output/*/k*.sys mdvmm/build/MDVMM.COM
 '

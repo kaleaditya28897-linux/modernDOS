@@ -7,3 +7,4 @@ test/** binary diff
 scripts/*.sh text eol=lf
 build/Containerfile text eol=lf
 tests/lfn/*.sh text eol=lf
+tests/mdvmm/*.sh text eol=lf

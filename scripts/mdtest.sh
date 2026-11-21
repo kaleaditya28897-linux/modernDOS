@@ -2,6 +2,7 @@
 # Run the modernDOS test suite in QEMU (headless) inside the build container:
 #  - upstream boot test (test/test.sh) for every kernel that was built
 #  - long filename API + DJGPP libc test (tests/lfn/run.sh), GCC kernel
+#  - MDVMM supervisor: DOS + tests inside the V86 monitor (tests/mdvmm/run.sh)
 . "$(dirname "$0")/mdenv.sh"
 md_run bash -c '
   rc=0
@@ -10,5 +11,6 @@ md_run bash -c '
     (cd test && ./test.sh ../$k disk_t boot_t "boot $(basename $k): ") || rc=1
   done
   tests/lfn/run.sh _output/gcc/kgc8632.sys || rc=1
+  tests/mdvmm/run.sh _output/gcc/kgc8632.sys || rc=1
   exit $rc
 '

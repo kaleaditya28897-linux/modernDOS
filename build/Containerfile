@@ -11,7 +11,7 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       gcc libc6-dev gcc-ia16-elf libi86-ia16-elf nasm upx-ucl make git python3 \
       qemu-system-x86 mtools dosfstools util-linux bash procps coreutils \
-      curl xz-utils bzip2 unzip \
+      curl xz-utils bzip2 unzip gcc-i686-linux-gnu binutils-i686-linux-gnu \
  && rm -rf /var/lib/apt/lists/*
 
 # Open Watcom v2 (same snapshot upstream CI uses) -> /opt/watcom
@@ -28,5 +28,11 @@ RUN curl -fsSL https://github.com/andrewwutw/build-djgpp/releases/download/v3.4/
 RUN mkdir -p /opt/cwsdpmi && cd /opt/cwsdpmi \
  && curl -fsSL -o csdpmi7b.zip https://www.delorie.com/pub/djgpp/current/v2misc/csdpmi7b.zip \
  && unzip -q csdpmi7b.zip && rm csdpmi7b.zip
+
+# FreeDOS 1.4 FreeCOM shell and HIMEMX XMS driver for MDVMM tests -> /opt/fdos
+RUN mkdir -p /opt/fdos && cd /opt/fdos \
+ && for p in freecom himemx; do \
+      curl -fsSL -o $p.zip https://www.ibiblio.org/pub/micro/pc-stuff/freedos/files/repositories/1.4/base/$p.zip \
+      && unzip -q -o -LL $p.zip && rm $p.zip; done
 
 WORKDIR /src
