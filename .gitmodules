@@ -5,3 +5,4 @@
 [submodule "country"]
 	path = country
 	url = https://github.com/FDOS/country.git
+	ignore = untracked

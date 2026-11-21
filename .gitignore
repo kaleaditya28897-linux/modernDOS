@@ -58,3 +58,8 @@ _downloads/**
 _output/**
 _watcom/**
 kernel/exeflat.rsp
+
+# modernDOS build/test artifacts
+test/*.img
+test/fdconfig.sys
+test/result.txt

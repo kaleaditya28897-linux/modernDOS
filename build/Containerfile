@@ -1,0 +1,16 @@
+# modernDOS build/test environment
+# Mirrors the cross-build parts of ci_prereq.sh (no dosemu / DOS-hosted builds).
+FROM docker.io/library/ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends software-properties-common gpg-agent ca-certificates \
+ && add-apt-repository -y ppa:tkchia/build-ia16 \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends \
+      gcc libc6-dev gcc-ia16-elf libi86-ia16-elf nasm upx-ucl make git python3 \
+      qemu-system-x86 mtools util-linux bash procps coreutils \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src

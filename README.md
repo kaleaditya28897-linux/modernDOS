@@ -1,3 +1,31 @@
+modernDOS
+=========
+
+**DOS, reimagined as if it never faded.** modernDOS is a fork of the FreeDOS kernel that imagines DOS kept evolving for 40 years: an original desktop GUI, modern native and networked applications, and booting on modern UEFI PCs. Every existing DOS program keeps working.
+
+### Compatibility contract
+INT 21h, INT 2Fh, program loading (EXEC) and the DOS version numbers reported by INT 21h/30h are frozen. New features are added on top of them and never change their existing behavior.
+
+### Roadmap
+| # | Milestone | Status |
+|---|---|---|
+| M1 | Kernel modernization: reproducible container build, QEMU boot tests, native long-filename (LFN) API in the kernel | in progress |
+| M2 | MDVMM supervisor: 32-bit V86 monitor + DPMI host, multiple DOS sessions | planned |
+| M3 | UEFI boot with native drivers (GOP display, AHCI/NVMe disks, USB input) | planned |
+| M4 | Original desktop GUI + widget toolkit (32-bit DPMI) | planned |
+| M5 | Native apps: file manager, editor, settings, terminal (DOS session in a window) | planned |
+| M6 | Networking: TCP/IP, sockets API, package manager, browser | planned |
+
+### Building (Linux, needs podman)
+```
+scripts/mdbuild.sh      # builds _output/gcc/kgc8632.sys in a container
+scripts/mdtest.sh       # boots it in QEMU and runs the boot test
+```
+
+The upstream FreeDOS README follows.
+
+---
+
 fd kernel
 =========
 
