@@ -17,7 +17,10 @@ ALLCFLAGS=$(ALLCFLAGS) -DI386
 !endif
 
 !if $(XFAT) == 32
-ALLCFLAGS=$(ALLCFLAGS) -DWITHFAT32 -DWITHLFNAPI
+ALLCFLAGS=$(ALLCFLAGS) -DWITHFAT32
+# The native LFN API (-DWITHLFNAPI) is only enabled in gcc.mak: with Open
+# Watcom, init code shares the 64K TGROUP with resident code and the LFN
+# code (~7.4K) does not fit. GCC is the reference build for modernDOS.
 NASMFLAGS=$(NASMFLAGS) -DWITHFAT32
 !endif
 

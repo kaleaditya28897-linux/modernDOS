@@ -853,7 +853,7 @@ STATIC void dos_to_filetime(UWORD date, UWORD time, UBYTE cs, UBYTE FAR *ft)
   q[1] = (UWORD)(days >> 16);
   q[2] = q[3] = 0;
   /* seconds = days * 86400 + time of day */
-  q_muladd(q, 43200, (time >> 11) * 1800 + ((time >> 5) & 63) * 30 +
+  q_muladd(q, 43200U, (time >> 11) * 1800 + ((time >> 5) & 63) * 30 +
            (time & 31));
   q_muladd(q, 2, 0);
   /* milliseconds, then 100ns units */
@@ -875,7 +875,7 @@ STATIC BOOL filetime_to_dos(const UBYTE FAR *ft, UWORD *date, UWORD *time,
     q[i] = fgetword(ft + 2 * i);
   q_div(q, 10000);
   ms = q_div(q, 1000);
-  sec2 = q_div(q, 43200);       /* half-day seconds */
+  sec2 = q_div(q, 43200U);       /* half-day seconds */
   rem2 = q_div(q, 2);
   if (q[2] || q[3])
     return FALSE;

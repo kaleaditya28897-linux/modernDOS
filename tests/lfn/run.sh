@@ -24,6 +24,12 @@ TEST="$ROOT/test"
 echo "== building lfntest.exe"
 ia16-elf-gcc -mcmodel=small -Os -o "$WORK/lfntest.exe" "$HERE/lfntest.c" -li86
 
+DJGPP=/opt/djgpp/bin/i586-pc-msdosdjgpp-gcc
+if [ -x "$DJGPP" ]; then
+  echo "== building djtest.exe (DJGPP)"
+  "$DJGPP" -O2 -o "$WORK/djtest.exe" "$HERE/djtest.c"
+fi
+
 echo "== building boot floppy"
 cd "$WORK"
 printf 'failure\r\n' > result.txt
@@ -41,6 +47,10 @@ cp "$WORK/lfntest.exe" test.com          # placeholder payload name
 
 export MTOOLS_SKIP_CHECK=1
 mcopy -i disk.img lfntest.exe ::LFNTEST.EXE
+if [ -f djtest.exe ]; then
+  mcopy -i disk.img djtest.exe ::DJTEST.EXE
+  mcopy -i disk.img "$(find /opt/cwsdpmi -iname cwsdpmi.exe | head -1)" ::CWSDPMI.EXE
+fi
 printf 'hello from linux\n' > linux.txt
 mcopy -i disk.img linux.txt "::Created On Linux.txt"
 

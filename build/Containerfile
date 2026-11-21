@@ -11,6 +11,22 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       gcc libc6-dev gcc-ia16-elf libi86-ia16-elf nasm upx-ucl make git python3 \
       qemu-system-x86 mtools dosfstools util-linux bash procps coreutils \
+      curl xz-utils bzip2 unzip \
  && rm -rf /var/lib/apt/lists/*
+
+# Open Watcom v2 (same snapshot upstream CI uses) -> /opt/watcom
+RUN mkdir -p /opt/watcom \
+ && curl -fsSL https://github.com/open-watcom/open-watcom-v2/releases/download/Current-build/ow-snapshot.tar.xz \
+    | tar -C /opt/watcom -xJ
+ENV WATCOM=/opt/watcom
+
+# DJGPP cross compiler (GCC 12.2, build-djgpp v3.4) -> /opt/djgpp
+RUN curl -fsSL https://github.com/andrewwutw/build-djgpp/releases/download/v3.4/djgpp-linux64-gcc1220.tar.bz2 \
+    | tar -C /opt -xj
+
+# CWSDPMI r7 DPMI host for running DJGPP programs -> /opt/cwsdpmi
+RUN mkdir -p /opt/cwsdpmi && cd /opt/cwsdpmi \
+ && curl -fsSL -o csdpmi7b.zip https://www.delorie.com/pub/djgpp/current/v2misc/csdpmi7b.zip \
+ && unzip -q csdpmi7b.zip && rm csdpmi7b.zip
 
 WORKDIR /src

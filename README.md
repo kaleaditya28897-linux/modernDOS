@@ -18,8 +18,8 @@ INT 21h, INT 2Fh, program loading (EXEC) and the DOS version numbers reported by
 
 ### Building (Linux, needs podman)
 ```
-scripts/mdbuild.sh      # builds _output/gcc/kgc8632.sys in a container
-scripts/mdtest.sh       # boots it in QEMU: boot test + long filename test suite
+scripts/mdbuild.sh      # builds the GCC (reference) and Open Watcom kernels
+scripts/mdtest.sh       # boots them in QEMU: boot tests, LFN API + DJGPP libc tests
 ```
 
 The upstream FreeDOS README follows.

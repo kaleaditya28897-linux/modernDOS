@@ -486,6 +486,49 @@ static void t_keep(void)
   check(lfn_delete("My Document With A Long Name 2.txt", 0), "delete by long name");
 }
 
+/* run A:\DJTEST.EXE (DJGPP libc test) if present, expect exit code 0 */
+static void t_djgpp(void)
+{
+  static char prog[] = "A:\\DJTEST.EXE", tail[] = "\0\r";
+  static unsigned pb[7];
+  unsigned psp, ds;
+
+  r.x.ax = 0x4300;              /* present? */
+  ds_dx(prog);
+  if (!dos())
+  {
+    out("DJGPP test not on disk, skipped\n");
+    return;
+  }
+  out("running DJGPP libc test (EXEC)\n");
+
+  /* small model: give back everything above DS:FFFF so EXEC has memory */
+  r.h.ah = 0x62;
+  dos();
+  psp = r.x.bx;
+  segread(&sr);
+  ds = sr.ds;
+  r.h.ah = 0x4a;
+  r.x.bx = (ds - psp) + 0x1000;
+  sr.es = psp;
+  dos();
+
+  pb[0] = 0;                    /* inherit environment */
+  pb[1] = FP_OFF(tail);
+  pb[2] = ds;
+  pb[3] = pb[5] = 0xffff;       /* no FCBs */
+  pb[4] = pb[6] = 0xffff;
+  r.x.ax = 0x4b00;
+  segread(&sr);
+  sr.es = sr.ds;
+  r.x.bx = FP_OFF(pb);
+  r.x.dx = FP_OFF(prog);
+  check(dos(), "EXEC DJTEST.EXE");
+  r.h.ah = 0x4d;
+  dos();
+  check(r.h.al == 0, "DJGPP test reported no failures");
+}
+
 static void finish(void)
 {
   static const char ok_[] = "success", bad[] = "failure";
@@ -528,6 +571,8 @@ int main(void)
   t_many();
   t_misc();
   t_keep();
+  lfn_chdir("A:\\");
+  t_djgpp();
   finish();
   return 0;
 }

@@ -33,6 +33,12 @@ Behaviour
   - 8 concurrent 714Eh search handles; handles left open are released
     when the owning process terminates.
 
+Builds
+  Enabled in the GCC (ia16-gcc) build, the modernDOS reference build.
+  The Open Watcom build does not include it: Watcom links init code into
+  the same 64K TGROUP as resident code, and the LFN code (~7.4K) does not
+  fit.  That build behaves exactly like upstream FreeDOS.
+
 Limitations
   - JOINed directories inside a long path are not followed.
   - Long paths are limited to 260 characters; the equivalent short path
@@ -41,4 +47,6 @@ Limitations
 Implementation: kernel/lfnapi.c (path translation, name generation,
 directory scanning) plus small hooks in kernel/fatfs.c that reserve
 consecutive directory entries and write the LFN entries.
-Tests: tests/lfn (run with scripts/mdtest.sh).
+Tests: tests/lfn (run with scripts/mdtest.sh): an ia16 test of every
+subfunction, plus a DJGPP program checking the same through libc
+(fopen, readdir, rename, stat, getcwd, _truename, ...).

@@ -1,12 +1,14 @@
 #!/bin/sh
 # Run the modernDOS test suite in QEMU (headless) inside the build container:
-#  - upstream boot test (test/test.sh)
-#  - long filename API test (tests/lfn/run.sh)
+#  - upstream boot test (test/test.sh) for every kernel that was built
+#  - long filename API + DJGPP libc test (tests/lfn/run.sh), GCC kernel
 . "$(dirname "$0")/mdenv.sh"
-KERNEL=${1:-_output/gcc/kgc8632.sys}
-md_run bash -c "
+md_run bash -c '
   rc=0
-  (cd test && ./test.sh ../$KERNEL diskgc bootgc 'boot gcc: ') || rc=1
-  tests/lfn/run.sh $KERNEL || rc=1
-  exit \$rc
-"
+  for k in _output/gcc/kgc8632.sys _output/wc/kwc8632.sys; do
+    [ -f "$k" ] || continue
+    (cd test && ./test.sh ../$k disk_t boot_t "boot $(basename $k): ") || rc=1
+  done
+  tests/lfn/run.sh _output/gcc/kgc8632.sys || rc=1
+  exit $rc
+'
