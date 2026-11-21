@@ -1,21 +1,44 @@
-                         FreeDOS LFN helper API.
+                modernDOS native long filename (LFN) API
 
-struct lfn_inode
-{
-  UNICODE name[261];
+The kernel implements the Windows 95 long filename functions
+(INT 21h AH=71h) for local FAT12, FAT16 and FAT32 drives.  No TSR such
+as DOSLFN is needed.  If one is loaded it hooks INT 21h first and keeps
+working as before.
 
-  struct dirent l_dir;          /* this file's dir entry image  */
+Supported functions
+  710Dh  reset drive
+  7139h  make directory          713Ah  remove directory
+  713Bh  change directory        7147h  get current directory
+  7141h  delete (SI=1: wildcards, long and short names)
+  7143h  get/set attributes, physical size, write/access/creation times
+  714Eh  find first              714Fh  find next     71A1h  find close
+  7156h  rename / move (also changes only the case of a name)
+  7160h  truename (CL=0 canonical, CL=1 short, CL=2 long)
+  716Ch  extended open/create
+  71A0h  volume information (BX=4006h, "FAT" or "FAT32")
+  71A7h  FILETIME <-> DOS date/time
+  71A8h  generate short name (basis name, no numeric tail)
+  7142h and 71A6h are passed to network redirectors as before.
+  All other subfunctions, and all calls for network/redirected drives,
+  return AX=7100h with CF set (the Win95 "not supported" convention).
 
-  ULONG l_diroff;               /* offset of the dir entry      */
-};
-typedef struct lfn_inode FAR * lfn_inode_ptr;
+Behaviour
+  - Short aliases follow Win95: NAME~1.EXT, and the base shrinks for
+    longer numeric tails (LOTSO~10.TXT).  Names that fit 8.3 but contain
+    lower case keep their case through an LFN entry.
+  - Lookups are case insensitive and match long and short names.
+  - Names are exchanged in the OEM code page; code page 437 is used for
+    the UCS-2 conversion on disk.
+  - DOS has no time zone; FILETIME values treat local time as UTC.
+  - 8 concurrent 714Eh search handles; handles left open are released
+    when the owning process terminates.
 
-COUNT lfn_allocate_inode(VOID);
-COUNT lfn_free_inode(COUNT handle);
+Limitations
+  - JOINed directories inside a long path are not followed.
+  - Long paths are limited to 260 characters; the equivalent short path
+    must fit in 127 characters (directories: 66, as for classic DOS).
 
-COUNT lfn_setup_inode(COUNT handle, ULONG dirstart, ULONG diroff);
-
-COUNT lfn_create_entries(COUNT handle, lfn_inode_ptr lip);
-
-COUNT lfn_dir_read(COUNT handle, lfn_inode_ptr lip);
-COUNT lfn_dir_write(COUNT handle);
+Implementation: kernel/lfnapi.c (path translation, name generation,
+directory scanning) plus small hooks in kernel/fatfs.c that reserve
+consecutive directory entries and write the LFN entries.
+Tests: tests/lfn (run with scripts/mdtest.sh).

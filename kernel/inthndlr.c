@@ -1544,69 +1544,16 @@ dispatch:
 #ifdef WITHFAT32
     /* LFN API */
     case 0x71:
+#ifdef WITHLFNAPI
+      /* native long filename support, see lfnapi.c */
+      CLEAR_CARRY_FLAG();
+      CritErrCode = SUCCESS;
+      rc = int21_lfn(&lr);
+      if (rc != LFN_PASS)
+        goto short_check;
+#endif
       switch (lr.AL)
       {
-#ifdef WITHLFNAPI
-        /* Win95 LFN - reset drive */
-        case 0x0d:
-        /* Win95 LFN - make directory */
-        case 0x39:
-        /* Win95 LFN - remove directory */
-        case 0x3a:
-        /* Win95 LFN - change directory */
-        case 0x3b:
-        /* Win95 LFN - delete file */
-        case 0x41:
-        /* Win95 LFN - extended get/set file attributes */
-        case 0x43:
-        /* Win95 LFN - get current directory */
-        case 0x47:
-        /* Win95 LFN - find first file */
-        case 0x4e:
-        /* Win95 LFN - find next file */
-        case 0xa2:  /* internal - same as 0x4f */
-        case 0x4f: {
-          goto unsupp;
-        }
-        /* Win95 LFN - rename file */
-        case 0x56:
-        /* Win95 LFN - canonicalize file name/path */
-        case 0x60: {
-          switch (lr.CL)
-          {
-            /* truename - canonicalize path, accepts short/long/or combination as input and may return combined short/long name */
-            case 0x00: {
-            }
-            /* get canonical short (8.3) name or path, truename that accepts long name and returns short name  */
-            case 0x01: {
-            }
-            /* get canonical long name or path, truename that accepts short name and returns long name */
-            case 0x02: {
-            }
-            default:
-              goto unsupp;
-          }
-        }
-        /* Win95 LFN - create or open file */
-        case 0xa9:  /* for real-mode servers only, AX is _global_ file handle on return */
-        case 0x6c: {
-          goto unsupp;
-        }
-        /* Win95 LFN - get volume information */
-        case 0xa0:
-        /* Win95 LFN - find file close */
-        case 0xa1:  {
-lfn_findclose:
-          goto unsupp;
-        }
-#if 0
-        /* Win95 LFN - internal use ??? */
-        case 0xa3:
-        case 0xa4:
-        case 0xa5:
-          goto unsupp;
-#endif
-#endif
         /* EDR-DOS LFN - Long LSEEK - SET CURRENT 64-bit FILE POSITION */
         case 0x42:
         /* Win95 LFN - get file info by handle */
@@ -1649,36 +1596,9 @@ lfn_findclose:
           fmemcpy(r, &saved_r, sizeof(saved_r));
           goto unsupp;
         }
-#ifdef WITHLFNAPI
-        /* Win95 LFN - Win95 64 UTC file time to/from DOS date and time (local timezone) */
-        case 0xa7: {
-          /* Note: valid input range limited to Jan 1, 1980 to Dec 31, 2107 */
-          switch (lr.BL)
-          {
-            /* from Win95 UTC to DOS date/time */
-            case 0x00: {
-            }
-            /* from DOS date/time to Win95 UTC */
-            case 0x01: {
-            }
-            default:
-              goto unsupp;
-          }
-        }
-        /* Win95 LFN - generate short filename */
-        case 0xa8:
-        /* Win95 LFN - subst */
-        case 0xaa: {
-          goto unsupp;
-        }
-#endif
         default:
           goto unsupp;
       }
-#ifdef WITHLFNAPI
-    /* Win95 beta LFN - find close */
-    case 0x72: goto lfn_findclose;
-#endif
 
       /* DOS 7.0+ FAT32 extended functions */
     case 0x73:
@@ -1688,44 +1608,6 @@ lfn_findclose:
       goto short_check;
 #endif
 
-#ifdef WITHLFNAPI
-      /* FreeDOS LFN helper API functions */
-    case 0x74:
-      {
-        switch (lr.AL)
-        {
-          /* Allocate LFN inode */
-          case 0x01:
-            rc = lfn_allocate_inode();
-            break;
-          /* Free LFN inode */
-          case 0x02:
-            rc = lfn_free_inode(lr.BX);
-            break;
-          /* Setup LFN inode */
-          case 0x03:
-            rc = lfn_setup_inode(lr.BX, MK_ULONG(lr.CX, lr.DX), MK_ULONG(lr.SI,lr.DI));
-            break;
-          /* Create LFN entries */
-          case 0x04:
-            rc = lfn_create_entries(lr.BX, (lfn_inode_ptr)FP_DS_DX);
-            break;
-          /* Read next LFN */
-          case 0x05:
-            rc = lfn_dir_read(lr.BX, (lfn_inode_ptr)FP_DS_DX);
-            break;
-          /* Write SFN pointed by LFN inode */
-          case 0x06:
-            rc = lfn_dir_write(lr.BX);
-            break;
-          default:
-            goto error_invalid;
-        }
-        lr.AX = rc;
-        CLEAR_CARRY_FLAG();
-        goto short_check;
-      }
-#endif
   }
   goto exit_dispatch;
 #ifdef WITHFAT32

@@ -247,16 +247,14 @@ void DosUmbLink(unsigned n);
 VOID mcb_print(mcb FAR * mcbp);
 
 /* lfnapi.c */
-COUNT lfn_allocate_inode(VOID);
-COUNT lfn_free_inode(COUNT handle);
-
-COUNT lfn_setup_inode(COUNT handle, ULONG dirstart, ULONG diroff);
-
-COUNT lfn_create_entries(COUNT handle, lfn_inode_ptr lip);
-COUNT lfn_remove_entries(COUNT handle);
-
-COUNT lfn_dir_read(COUNT handle, lfn_inode_ptr lip);
-COUNT lfn_dir_write(COUNT handle);
+#ifdef WITHLFNAPI
+#define LFN_PASS 0x7100   /* int21_lfn(): not handled, report unsupported */
+extern const char *lfn_create_name;
+extern UWORD lfn_free_need, lfn_free_run;
+COUNT int21_lfn(lregs *r);
+COUNT lfn_write_entries(f_node_ptr fnp);
+VOID lfn_close_finds(UWORD psp);
+#endif
 
 /* nls.c */
 BYTE DosYesNo(UWORD ch);

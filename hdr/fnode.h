@@ -54,12 +54,4 @@ struct f_node {
 
 typedef struct f_node *f_node_ptr;
 
-struct lfn_inode {
-  UNICODE l_name[261];          /* Long file name string          */
-                                /* If the string is empty,        */
-                                /* then file has the 8.3 name     */
-  struct dirent l_dir;          /* Directory entry image          */
-  UWORD l_diroff;               /* Current directory entry offset */
-};
-  
-typedef struct lfn_inode FAR * lfn_inode_ptr;
+

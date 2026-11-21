@@ -195,6 +195,10 @@ int dos_open(char *path, unsigned flags, unsigned attrib, int fd)
     init_direntry(&fnp->f_dir, attrib, FREE, fnp->f_dmp->dm_name_pat);
     if (!dir_write(fnp))
       return DE_ACCESS;
+#ifdef WITHLFNAPI
+    if (status == S_CREATED && lfn_write_entries(fnp) != SUCCESS)
+      return DE_ACCESS;
+#endif
   }
 
   merge_file_changes(fnp, status == S_OPENED); /* /// Added - Ron Cemer */
@@ -523,11 +527,23 @@ COUNT dos_rename(BYTE * path1, BYTE * path2, int attrib)
   /* one, it's an error.                                          */
   fnp2 = &fnode[1];
   ret = find_fname(path2, attrib, fnp2);
+#ifdef WITHLFNAPI
+  /* changing only the long name (or its case) of the same entry */
+  if (ret == SUCCESS && lfn_create_name &&
+      fnp1->f_dmp->dm_dircluster == fnp2->f_dmp->dm_dircluster &&
+      fnp1->f_dmp->dm_entry == fnp2->f_dmp->dm_entry)
+    ret = DE_FILENOTFND;
+#endif
   if (ret != DE_FILENOTFND)
     return ret == SUCCESS ? DE_ACCESS : ret;
 
   fcbname = fnp2->f_dmp->dm_name_pat;
-  if (fnp1->f_dmp->dm_dircluster == fnp2->f_dmp->dm_dircluster)
+  if (fnp1->f_dmp->dm_dircluster == fnp2->f_dmp->dm_dircluster
+#ifdef WITHLFNAPI
+      /* a long name needs a fresh run of entries: move the entry */
+      && lfn_create_name == NULL
+#endif
+     )
   {
     /* rename in the same directory: change the directory entry in-place */
     fnp2 = fnp1;
@@ -537,7 +553,8 @@ COUNT dos_rename(BYTE * path1, BYTE * path2, int attrib)
   else
   {
     /* do not allow to rename directories between different directories  */
-    if (fnp1->f_dir.dir_attrib & D_DIR)
+    if ((fnp1->f_dir.dir_attrib & D_DIR) &&
+        fnp1->f_dmp->dm_dircluster != fnp2->f_dmp->dm_dircluster)
       return DE_ACCESS;
 
     /* create new entry in other directory */
@@ -562,7 +579,13 @@ COUNT dos_rename(BYTE * path1, BYTE * path2, int attrib)
   memcpy(fnp2->f_dir.dir_name, fcbname, FNAME_SIZE + FEXT_SIZE);
 
   /* SUCCESSful completion, return it                             */
-  return dir_write(fnp2) ? SUCCESS : DE_ACCESS;
+  if (!dir_write(fnp2))
+    return DE_ACCESS;
+#ifdef WITHLFNAPI
+  return lfn_write_entries(fnp2);
+#else
+  return SUCCESS;
+#endif
 }
 
 /*                                                              */
@@ -625,6 +648,25 @@ STATIC BOOL find_free(f_node_ptr fnp)
 {
   COUNT rc;
 
+#ifdef WITHLFNAPI
+  /* Find lfn_free_need consecutive free entries (room for long name  */
+  /* entries in front of the 8.3 entry). Returns with fnp on the last */
+  /* one. lfn_free_run carries over a directory extension.            */
+  for (;;)
+  {
+    rc = dir_read(fnp);
+    if (rc < 0)
+      return FALSE;
+    if (rc == 0 || fnp->f_dir.dir_name[0] == DELETED)
+    {
+      if (++lfn_free_run >= lfn_free_need)
+        return TRUE;
+    }
+    else
+      lfn_free_run = 0;
+    fnp->f_dmp->dm_entry++;
+  }
+#else
   while ((rc = dir_read(fnp)) == 1)
   {
     if (fnp->f_dir.dir_name[0] == DELETED)
@@ -632,6 +674,7 @@ STATIC BOOL find_free(f_node_ptr fnp)
     fnp->f_dmp->dm_entry++;
   }
   return rc >= 0;
+#endif
 }
 
 /* alloc_find_free: resets the directory                          */
@@ -639,7 +682,16 @@ STATIC BOOL find_free(f_node_ptr fnp)
 /* available, tries to extend the directory.                      */
 STATIC int alloc_find_free(f_node_ptr fnp, char *path)
 {
+  int ret = SUCCESS;
+
   fnp = split_path(path, fnp);
+
+#ifdef WITHLFNAPI
+  /* one entry per 13 characters of long name plus the 8.3 entry  */
+  lfn_free_run = 0;
+  if (lfn_create_name)
+    lfn_free_need = 1 + (strlen(lfn_create_name) + 12) / 13;
+#endif
 
   /* Get a free f_node pointer so that we can use */
   /* it in building the new file.                 */
@@ -649,19 +701,19 @@ STATIC int alloc_find_free(f_node_ptr fnp, char *path)
   {
     if (fnp->f_dmp->dm_dircluster == 0)
     {
-      return DE_TOOMANY;
+      ret = DE_TOOMANY;
     }
     else
     {
       /* Otherwise just expand the directory          */
-      int ret;
-
-      if ((ret = extend_dir(fnp)) != SUCCESS)
-        /* fnp already closed in extend_dir */
-        return ret;
+      /* fnp already closed in extend_dir on error    */
+      ret = extend_dir(fnp);
     }
   }
-  return SUCCESS;
+#ifdef WITHLFNAPI
+  lfn_free_need = 1;
+#endif
+  return ret;
 }
 
 
@@ -844,6 +896,10 @@ COUNT dos_mkdir(BYTE * dir)
   /* Write the new directory entry                         */
   if (!dir_write(fnp))
     return DE_ACCESS;
+#ifdef WITHLFNAPI
+  if ((ret = lfn_write_entries(fnp)) != SUCCESS)
+    return ret;
+#endif
 
   /* Craft the new directory. Note that if we're in a new  */
   /* directory just under the root, ".." pointer is 0.     */
@@ -930,8 +986,21 @@ STATIC COUNT extend_dir(f_node_ptr fnp)
   if (ret != SUCCESS)
     return ret;
 
+#ifdef WITHLFNAPI
+  while (!find_free(fnp))
+  {
+    /* still not enough consecutive entries for the long name */
+    cluster = extend(fnp);
+    if (cluster == LONG_LAST_CLUSTER)
+      return DE_HNDLDSKFULL;
+    ret = clear_dir(fnp, cluster);
+    if (ret != SUCCESS)
+      return ret;
+  }
+#else
   if (!find_free(fnp))
     return DE_HNDLDSKFULL;
+#endif
 
   /* flush the drive buffers so that all info is written          */
   if (!flush_buffers(fnp->f_dpb->dpb_unit))

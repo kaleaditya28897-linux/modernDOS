@@ -10,7 +10,7 @@ RUN apt-get update \
  && apt-get update \
  && apt-get install -y --no-install-recommends \
       gcc libc6-dev gcc-ia16-elf libi86-ia16-elf nasm upx-ucl make git python3 \
-      qemu-system-x86 mtools util-linux bash procps coreutils \
+      qemu-system-x86 mtools dosfstools util-linux bash procps coreutils \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src

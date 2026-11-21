@@ -9,7 +9,7 @@ INT 21h, INT 2Fh, program loading (EXEC) and the DOS version numbers reported by
 ### Roadmap
 | # | Milestone | Status |
 |---|---|---|
-| M1 | Kernel modernization: reproducible container build, QEMU boot tests, native long-filename (LFN) API in the kernel | in progress |
+| M1 | Kernel modernization: reproducible container build, QEMU boot tests, native long-filename (LFN) API in the kernel (`docs/lfnapi.txt`) | done |
 | M2 | MDVMM supervisor: 32-bit V86 monitor + DPMI host, multiple DOS sessions | planned |
 | M3 | UEFI boot with native drivers (GOP display, AHCI/NVMe disks, USB input) | planned |
 | M4 | Original desktop GUI + widget toolkit (32-bit DPMI) | planned |
@@ -19,7 +19,7 @@ INT 21h, INT 2Fh, program loading (EXEC) and the DOS version numbers reported by
 ### Building (Linux, needs podman)
 ```
 scripts/mdbuild.sh      # builds _output/gcc/kgc8632.sys in a container
-scripts/mdtest.sh       # boots it in QEMU and runs the boot test
+scripts/mdtest.sh       # boots it in QEMU: boot test + long filename test suite
 ```
 
 The upstream FreeDOS README follows.

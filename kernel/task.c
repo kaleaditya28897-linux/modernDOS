@@ -590,6 +590,11 @@ VOID return_user(void)
 
   abort_progress = -1;
 
+#ifdef WITHLFNAPI
+  /* release LFN search handles the process left open */
+  lfn_close_finds(cu_psp);
+#endif
+
   /* And free all process memory if not a TSR return      */
   network_redirector(REM_PROCESS_END);
   /* might be a good idea to do that after closing
