@@ -44,11 +44,15 @@ _start:
         xor     eax, eax
         rep     stosd
 
-        ; PT0: identity map 0-4MB, user accessible (V86 runs at CPL 3)
+        ; PT0: identity map 0-4MB. Only the V86 address space (0-10FFFFh)
+        ; is user accessible; the rest belongs to XMS and the monitor.
         lea     edi, [esi + 4096]
         mov     eax, 7
         mov     ecx, 1024
-.pt0:   stosd
+.pt0:   cmp     eax, 110000h
+        jb      .user
+        and     al, ~4
+.user:  stosd
         add     eax, 4096
         loop    .pt0
         lea     eax, [esi + 4096 + 7]
@@ -112,7 +116,7 @@ gdt_load:
 ; void enter_frame(const struct frame *f) - resume a trap frame (e.g. enter
 ; V86). The frame is copied to the top of the kernel stack, the C caller's
 ; stack is abandoned.
-FRAME_SIZE equ 76
+FRAME_SIZE equ 92
 global enter_frame
 enter_frame:
         mov     esi, [esp + 4]
@@ -140,6 +144,10 @@ isr%[i]:
 extern trap_dispatch
 isr_common:
         pushad
+        push    ds
+        push    es
+        push    fs
+        push    gs
         mov     ax, KDATA
         mov     ds, ax
         mov     es, ax
@@ -147,8 +155,50 @@ isr_common:
         push    esp
         call    trap_dispatch
         add     esp, 4
+; Returning to a ring 3 protected mode client: IRET to a 16 bit stack
+; segment only reloads SP, so ESP[31:16] would leak the monitor's stack
+; address. "espfix": IRET from an alias stack segment whose ESP already
+; has the client's upper 16 bits.
+EFL_VM  equ 0x20000
+ESPFIX_SEL equ 0x38
+extern gdt_table
 global trap_return
 trap_return:
+        test    dword [esp + 64], EFL_VM        ; frame eflags
+        jnz     .plain
+        test    byte [esp + 60], 3              ; frame cs: back to ring 3?
+        jz      .plain
+        mov     eax, [esp + 56]                 ; eip, cs, eflags, esp, ss
+        mov     [espfix_buf], eax
+        mov     eax, [esp + 60]
+        mov     [espfix_buf + 4], eax
+        mov     eax, [esp + 64]
+        mov     [espfix_buf + 8], eax
+        mov     eax, [esp + 68]
+        mov     [espfix_buf + 12], eax
+        mov     eax, [esp + 72]
+        mov     [espfix_buf + 16], eax
+        mov     ecx, [esp + 68]
+        and     ecx, 0xffff0000                 ; new ESP: client's upper half
+        mov     [espfix_ptr], ecx
+        mov     eax, espfix_buf
+        sub     eax, ecx                        ; segment base
+        mov     [gdt_table + ESPFIX_SEL + 2], ax
+        shr     eax, 16
+        mov     [gdt_table + ESPFIX_SEL + 4], al
+        mov     [gdt_table + ESPFIX_SEL + 7], ah
+        pop     gs
+        pop     fs
+        pop     es
+        pop     ds
+        popad
+        lss     esp, [cs:espfix_ptr]
+        iretd
+.plain:
+        pop     gs
+        pop     fs
+        pop     es
+        pop     ds
         popad
         add     esp, 8                  ; vector, error code
         iretd
@@ -162,8 +212,15 @@ isr_table:
 %assign i i+1
 %endrep
 
+section .data
+espfix_ptr:
+        dd      0
+        dw      ESPFIX_SEL
+
 section .bss
 align 16
+espfix_buf:
+        resb    32
         resb    16384
 global kstack_top
 kstack_top:

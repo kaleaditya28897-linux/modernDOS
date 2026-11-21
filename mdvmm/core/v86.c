@@ -18,7 +18,7 @@ static uint8_t fetch8(struct frame *f, uint32_t off)
   return *(uint8_t *)rm_ptr(f->cs, off);
 }
 
-static void push16(struct frame *f, uint16_t v)
+void v86_push16(struct frame *f, uint16_t v)
 {
   uint16_t sp = (uint16_t)(f->esp - 2);
   *(uint16_t *)rm_ptr(f->ss, sp) = v;
@@ -32,7 +32,7 @@ static void push32(struct frame *f, uint32_t v)
   f->esp = (f->esp & 0xffff0000u) | sp;
 }
 
-static uint16_t pop16(struct frame *f)
+uint16_t v86_pop16(struct frame *f)
 {
   uint16_t sp = (uint16_t)f->esp;
   uint16_t v = *(uint16_t *)rm_ptr(f->ss, sp);
@@ -52,7 +52,7 @@ static uint32_t pop32(struct frame *f)
 /* virtual flags                                                    */
 
 /* flags as the V86 program sees them */
-static uint32_t vflags_get(struct frame *f)
+uint32_t v86_vflags(struct frame *f)
 {
   return (f->eflags & (EFL_USER | EFL_AC | EFL_ID)) | 0x2 |
       (vm1.vif ? EFL_IF : 0) | vm1.vflags;
@@ -79,13 +79,13 @@ static void set_cf(struct frame *f, int on)
 /* interrupt reflection                                             */
 
 /* simulate a real mode INT vec: f->eip must point at the return address */
-static void reflect(struct frame *f, uint8_t vec)
+void v86_reflect(struct frame *f, uint8_t vec)
 {
   const uint16_t *ivt = (const uint16_t *)(uint32_t)(vec * 4);
 
-  push16(f, (uint16_t)vflags_get(f));
-  push16(f, (uint16_t)f->cs);
-  push16(f, (uint16_t)f->eip);
+  v86_push16(f, (uint16_t)v86_vflags(f));
+  v86_push16(f, (uint16_t)f->cs);
+  v86_push16(f, (uint16_t)f->eip);
   vm1.vif = 0;
   f->eflags &= ~(EFL_TF | EFL_AC);
   f->eip = ivt[0];
@@ -111,7 +111,8 @@ static void deliver_pending(struct frame *f)
     if (vm1.pending & (1u << irq))
     {
       vm1.pending &= ~(1u << irq);
-      reflect(f, irq_vector(irq));
+      if (!dpmi_irq_v86(f, irq))
+        v86_reflect(f, irq_vector(irq));
       return;
     }
   }
@@ -174,6 +175,13 @@ static int intercept(struct frame *f, uint8_t vec)
       return 1;
     }
   }
+  else if (vec == 0x2f && AX(f) == 0x1687)
+  {
+    dpmi_detect(f);
+    return 1;
+  }
+  else if (vec == 0x21 && AH(f) == 0x4c)
+    dpmi_rm_exit();             /* then terminate in DOS as usual */
   else if (vec == 0x2f && AH(f) == 0xde)
   {
     switch (AL(f))
@@ -291,13 +299,13 @@ static void v86_gp(struct frame *f)
     case 0x9c:                  /* PUSHF(D) */
       f->eip = (uint16_t)(ip + len);
       if (o32)
-        push32(f, vflags_get(f));
+        push32(f, v86_vflags(f));
       else
-        push16(f, (uint16_t)vflags_get(f));
+        v86_push16(f, (uint16_t)v86_vflags(f));
       return;
     case 0x9d:                  /* POPF(D) */
       f->eip = (uint16_t)(ip + len);
-      vflags_set(f, o32 ? pop32(f) : pop16(f), o32);
+      vflags_set(f, o32 ? pop32(f) : v86_pop16(f), o32);
       deliver_pending(f);
       return;
     case 0xcf:                  /* IRET(D) */
@@ -309,9 +317,9 @@ static void v86_gp(struct frame *f)
       }
       else
       {
-        f->eip = pop16(f);
-        f->cs = pop16(f);
-        vflags_set(f, pop16(f), 0);
+        f->eip = v86_pop16(f);
+        f->cs = v86_pop16(f);
+        vflags_set(f, v86_pop16(f), 0);
       }
       deliver_pending(f);
       return;
@@ -320,19 +328,24 @@ static void v86_gp(struct frame *f)
       uint8_t vec = fetch8(f, ip + len);
       f->eip = (uint16_t)(ip + len + 1);
       if (!intercept(f, vec))
-        reflect(f, vec);
+        v86_reflect(f, vec);
       return;
     }
     case 0xcc:                  /* INT3 */
       f->eip = (uint16_t)(ip + len);
-      reflect(f, 3);
+      v86_reflect(f, 3);
       return;
     case 0xce:                  /* INTO */
       f->eip = (uint16_t)(ip + len);
       if (f->eflags & EFL_OF)
-        reflect(f, 4);
+        v86_reflect(f, 4);
       return;
-    case 0xf4:                  /* HLT */
+    case 0xf4:                  /* HLT (or a DPMI breakpoint) */
+      if (f->cs == boot.stub_seg && ip >= boot.stub_bp && ip < boot.stub_bp + BP_COUNT)
+      {
+        dpmi_v86_bp(f, ip - boot.stub_bp);
+        return;
+      }
       f->eip = (uint16_t)(ip + len);
       halt(f);
       return;
@@ -376,7 +389,7 @@ void v86_exception(struct frame *f)
     case 0x05:                  /* bound */
     case 0x06:                  /* invalid opcode */
     case 0x07:                  /* no FPU */
-      reflect(f, (uint8_t)f->vector);
+      v86_reflect(f, (uint8_t)f->vector);
       return;
   }
   panic_frame(f, "exception in V86 mode");

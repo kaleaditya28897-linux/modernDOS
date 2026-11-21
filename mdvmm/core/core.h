@@ -11,6 +11,10 @@
 #define KCODE     0x08
 #define KDATA     0x10
 #define TSS_SEL   0x18
+#define LDT_SEL   0x20
+#define HCODE_SEL 0x2b          /* ring 3 host code (PM breakpoints)  */
+#define HDATA_SEL 0x33          /* ring 3 host data (host PM stacks)  */
+#define ESPFIX_SEL 0x38         /* ring 0 alias stack for IRET to 16 bit SS */
 
 #define EFL_CF    0x00000001u
 #define EFL_ZF    0x00000040u
@@ -26,9 +30,11 @@
 /* flags a V86 program may change directly */
 #define EFL_USER  0x00000DD5u   /* CF PF AF ZF SF TF DF OF */
 
-/* Trap frame, built by isr_common (entry.asm). The last five fields are
- * only present for traps from V86 mode; esp/ss also for traps from ring 3. */
+/* Trap frame, built by isr_common (entry.asm). esp/ss are only present for
+ * traps from ring 3 or V86, es/ds/fs/gs only for traps from V86 mode
+ * (never touch them for other frames: they lie above the stack). */
 struct frame {
+  uint32_t pgs, pfs, pes, pds;                         /* PM segment regs */
   uint32_t edi, esi, ebp, esp_k, ebx, edx, ecx, eax;   /* pushad */
   uint32_t vector, err;
   uint32_t eip, cs, eflags;
@@ -47,6 +53,10 @@ struct frame {
 #define AH(f) (*((uint8_t *)&(f)->eax + 1))
 #define BL(f) (*(uint8_t *)&(f)->ebx)
 #define BH(f) (*((uint8_t *)&(f)->ebx + 1))
+#define CL(f) (*(uint8_t *)&(f)->ecx)
+#define CH(f) (*((uint8_t *)&(f)->ecx + 1))
+#define DL(f) (*(uint8_t *)&(f)->edx)
+#define DH(f) (*((uint8_t *)&(f)->edx + 1))
 
 static inline void outb(uint16_t p, uint8_t v) { __asm__ volatile("outb %0,%1" :: "a"(v), "Nd"(p)); }
 static inline void outw(uint16_t p, uint16_t v) { __asm__ volatile("outw %0,%1" :: "a"(v), "Nd"(p)); }
@@ -73,13 +83,22 @@ void panic_frame(struct frame *f, const char *why) __attribute__((noreturn));
 /* mm.c */
 extern struct bootinfo boot;
 void mm_init(uint32_t free_phys);
-uint32_t page_alloc(void);
+uint32_t page_alloc(void);                   /* 0 if none */
+void page_free(uint32_t phys);
+uint32_t pages_free(void);
+uint32_t pages_total(void);
+int map_page(uint32_t lin, uint32_t phys, uint32_t flags);
+uint32_t unmap_page(uint32_t lin);
+uint32_t lin_to_pte(uint32_t lin);
 void *kmap(int slot, uint32_t phys);
 void phys_copy(uint32_t dst, uint32_t src, uint32_t len);
 
 /* cpu.c */
 void cpu_init(void);
 void io_trap(uint16_t port, int trap);
+void gdt_set(int i, uint32_t base, uint32_t limit, uint8_t access, uint8_t gran);
+void ldt_load(void *base, uint32_t entries);
+const void *gdt_entry(uint16_t sel);
 
 /* v86.c */
 struct vm {
@@ -91,12 +110,26 @@ extern struct vm vm1;
 void v86_start(void);
 void v86_exception(struct frame *f);
 void v86_irq(struct frame *f, int irq);
+void v86_reflect(struct frame *f, uint8_t vec);
+void v86_push16(struct frame *f, uint16_t v);
+uint16_t v86_pop16(struct frame *f);
+uint32_t v86_vflags(struct frame *f);
+
+/* dpmi.c */
+void dpmi_init(void);
+void dpmi_detect(struct frame *v);
+void dpmi_v86_bp(struct frame *v, int bp);
+void dpmi_trap(struct frame *f);
+void dpmi_irq(struct frame *f, int irq);
+int dpmi_irq_v86(struct frame *v, int irq);
+int dpmi_take_pending(struct frame *pm);
+void dpmi_rm_exit(void);
 
 /* entry.asm */
 extern const uint32_t isr_table[256];
 extern uint8_t kstack_top[];
 void gdt_load(void *gdtr);
 void enter_frame(const struct frame *f) __attribute__((noreturn));
-_Static_assert(sizeof(struct frame) == 76, "FRAME_SIZE in entry.asm");
+_Static_assert(sizeof(struct frame) == 92, "FRAME_SIZE in entry.asm");
 
 #endif

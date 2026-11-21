@@ -13,7 +13,7 @@ CFLAGS  = -m32 -std=gnu11 -O2 -Wall -Wextra -Werror \
 NFLAGS  = -Iinclude/
 
 B       = build
-COBJS   = $(B)/entry.o $(B)/main.o $(B)/lib.o $(B)/mm.o $(B)/cpu.o $(B)/v86.o
+COBJS   = $(B)/entry.o $(B)/main.o $(B)/lib.o $(B)/mm.o $(B)/cpu.o $(B)/v86.o $(B)/dpmi.o
 HDRS    = core/core.h include/bootinfo.h
 
 all: $(B)/MDVMM.COM

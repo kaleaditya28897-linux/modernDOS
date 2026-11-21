@@ -6,14 +6,24 @@ void core_main(struct bootinfo *bi, uint32_t free_phys);
 
 void trap_dispatch(struct frame *f)
 {
+  int user = !(f->eflags & EFL_VM) && (f->cs & 3) == 3;
+
   if (f->vector >= 0x20 && f->vector < 0x30)
   {
-    v86_irq(f, (int)f->vector - 0x20);
+    if (user)
+      dpmi_irq(f, (int)f->vector - 0x20);
+    else
+      v86_irq(f, (int)f->vector - 0x20);
     return;
   }
   if (f->eflags & EFL_VM)
   {
     v86_exception(f);
+    return;
+  }
+  if (user)
+  {
+    dpmi_trap(f);
     return;
   }
   panic_frame(f, "exception in monitor");
@@ -31,5 +41,6 @@ void core_main(struct bootinfo *bi, uint32_t free_phys)
 
   mm_init(free_phys);
   cpu_init();
+  dpmi_init();
   v86_start();
 }

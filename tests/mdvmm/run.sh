@@ -6,6 +6,9 @@
 #   V86CHK   - CPU is in V86 mode and the MDVMM API answers
 #   XMSTEST  - XMS moves work (monitor emulates INT 15h AH=87h)
 #   LFNTEST  - the full long filename suite (heavy INT 21h, timer, disk)
+#   DJTEST   - DJGPP libc long filename test, using MDVMM as DPMI host
+#   DPMITEST - DPMI host test: memory, exceptions, IRQ0, callbacks, ...
+# There is no CWSDPMI on the disk: DJGPP programs must use MDVMM.
 # MDVMM and the tests log to the QEMU debug console.
 #
 # Usage: tests/mdvmm/run.sh [kernel.sys]
@@ -25,6 +28,9 @@ for p in v86chk poweroff xmstest; do
   "$NASM" -f bin -o "$WORK/$p.com" "$HERE/$p.asm"
 done
 ia16-elf-gcc -mcmodel=small -Os -o "$WORK/lfntest.exe" "$ROOT/tests/lfn/lfntest.c" -li86
+DJGPP=/opt/djgpp/bin/i586-pc-msdosdjgpp-gcc
+"$DJGPP" -O2 -o "$WORK/djtest.exe" "$ROOT/tests/lfn/djtest.c"
+"$DJGPP" -O2 -o "$WORK/dpmitest.exe" "$HERE/dpmitest.c"
 
 echo "== building boot floppy"
 cd "$WORK"
@@ -40,6 +46,10 @@ IF ERRORLEVEL 1 GOTO END
 A:\XMSTEST.COM
 IF ERRORLEVEL 1 GOTO END
 A:\LFNTEST.EXE /T
+IF ERRORLEVEL 1 GOTO END
+A:\DJTEST.EXE
+IF ERRORLEVEL 1 GOTO END
+A:\DPMITEST.EXE
 IF ERRORLEVEL 1 GOTO END
 ECHO success>A:\RESULT.TXT
 :END
@@ -66,6 +76,8 @@ mcopy -i disk.img v86chk.com ::V86CHK.COM
 mcopy -i disk.img xmstest.com ::XMSTEST.COM
 mcopy -i disk.img poweroff.com ::POWEROFF.COM
 mcopy -i disk.img lfntest.exe ::LFNTEST.EXE
+mcopy -i disk.img djtest.exe ::DJTEST.EXE        # note: no CWSDPMI on this disk
+mcopy -i disk.img dpmitest.exe ::DPMITEST.EXE
 printf 'hello from linux\n' > linux.txt
 mcopy -i disk.img linux.txt "::Created On Linux.txt"
 
@@ -80,7 +92,8 @@ fail=0
 result=$(mtype -i disk.img ::RESULT.TXT 2>/dev/null | tr -d '\r\n' || true)
 [ "$result" = success ] || { echo "  FAIL RESULT.TXT says '$result'"; fail=1; }
 for marker in "MDVMM core:" "v86: entering VM1" "v86chk: protected mode bit set" \
-              "xmstest: 4K round trip" "RESULT: PASSED"; do
+              "xmstest: 4K round trip" "RESULT: PASSED" "dpmi: 32 bit client" \
+              "DJGPP: 0 failures" "DPMI: 0 failures"; do
   if grep -q "$marker" debug.log; then echo "  ok   log: $marker"; else
     echo "  FAIL log missing: $marker"; fail=1; fi
 done

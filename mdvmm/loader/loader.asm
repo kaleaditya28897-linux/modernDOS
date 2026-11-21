@@ -12,15 +12,35 @@
         bits    16
         org     100h
 
-POOL_KB         equ 16384               ; default pool size
+POOL_KB         equ 32768               ; default pool size
 POOL_KB_MIN     equ 1024
 
 start:
         jmp     main
 
 ; ----------------------------------------------------------------------
-; resident part: V86-side stubs the monitor refers to (M2.2: DPMI entry)
+; resident part: V86-side stubs the monitor refers to
 ; ----------------------------------------------------------------------
+; Breakpoints: the monitor recognizes a HLT at stub_bp + n (see bootinfo.inc)
+stub_bp:
+        times   BP_COUNT hlt
+stub_psp        dw      0
+
+; DPMI mode switch entry (returned by INT 2Fh AX=1687h)
+stub_entry:
+        push    ax
+        push    bx
+        mov     ah, 62h                 ; current PSP, for the client's ES
+        int     21h
+        mov     [cs:stub_psp], bx
+        pop     bx
+        pop     ax
+        jmp     stub_bp + BP_DPMI_ENTRY
+
+; DPMI 0305h real mode state save/restore: nothing to save
+stub_retf:
+        retf
+
         align   16
 resident_end:
 
@@ -121,6 +141,10 @@ main:
         mov     [bi + bootinfo.gs], gs
         mov     [bi + bootinfo.psp], cs
         mov     [bi + bootinfo.stub_seg], cs
+        mov     word [bi + bootinfo.stub_bp], stub_bp
+        mov     word [bi + bootinfo.stub_entry], stub_entry
+        mov     word [bi + bootinfo.stub_psp], stub_psp
+        mov     word [bi + bootinfo.stub_retf], stub_retf
         mov     eax, ebx
         add     eax, tmp_gdt
         mov     [tmp_gdtr + 2], eax

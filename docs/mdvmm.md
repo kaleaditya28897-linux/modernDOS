@@ -9,7 +9,7 @@ and several DOS sessions.
 | Part | State |
 |---|---|
 | M2.1 V86 monitor | working: DOS, FreeCOM, XMS, disk, timer, keyboard controller under the monitor |
-| M2.2 DPMI host | planned |
+| M2.2 DPMI host | working: DPMI 0.9 for 16/32 bit clients; DJGPP programs run without CWSDPMI |
 | M2.3 multiple DOS sessions | planned |
 
 ## Using it
@@ -19,8 +19,9 @@ DEVICE=HIMEMX.EXE        (CONFIG.SYS: any XMS driver)
 MDVMM                    (AUTOEXEC.BAT or prompt)
 ```
 
-MDVMM takes a 16 MB pool from XMS (less if less is free), moves itself there
-and keeps under 1 KB of conventional memory. It cannot be unloaded; reboot
+MDVMM takes a 32 MB pool from XMS (less if less is free), moves itself there
+and keeps under 1 KB of conventional memory. DPMI programs allocate from the
+pool. It cannot be unloaded; reboot
 to leave it. It refuses to start when the CPU is already in protected or V86
 mode (EMM386, JemmEx, another MDVMM).
 
@@ -54,17 +55,51 @@ Intercepted services:
 
 The monitor logs to I/O port E9h (QEMU `-debugcon`, Bochs).
 
-## Limitations (M2.1)
+## DPMI host
 
-- Programs that switch to protected mode themselves (without DPMI or VCPI)
-  stop the machine with a monitor panic. DPMI arrives in M2.2; VCPI is not
-  planned.
+`core/dpmi.c` implements DPMI 0.9 for one client at a time (16 or 32 bit).
+Clients run at ring 3 with IOPL 3, so CLI/STI act on the real interrupt
+flag, as with CWSDPMI.
+
+Mode transitions use breakpoints. On the V86 side these are HLT
+instructions in the loader's resident stub (`BP_*` in `bootinfo.h`): the
+DPMI entry, returns from real-mode calls, raw mode switches and 16 real-mode
+callbacks. On the protected-mode side, a ring-3 host code page full of HLT
+(selector 2Bh) serves as return addresses for exception, IRQ and callback
+handlers and as the default interrupt and exception vectors. Nested
+transitions are kept on a stack of saved frames.
+
+| Group | Functions |
+|---|---|
+| descriptors | 0000-0003h, 0006-000Ch (LDT of 1024 entries) |
+| DOS memory | 0100-0102h |
+| interrupts | 0200-0205h; IRQs go to PM handlers in PM and in real mode |
+| real mode | 0300-0306h, 16 callbacks, raw switch |
+| info | 0400h (0.90, 32 bit), 0500h |
+| memory | 0501-0503h (paged from the pool), 0600-0604h, 0702/0703h, 0800/0801h |
+| virtual IF | 0900-0902h |
+
+The host real-mode stack is the 2 KB of private data the client allocates
+for the host (SI=80h from INT 2Fh AX=1687h). For returns to 16-bit client
+stacks the monitor uses the "espfix" technique, so ESP[31:16] does not leak
+the monitor's stack address.
+
+Not yet: DPMI 1.0 functions, several clients at once (a DPMI program
+starting another one), virtual memory.
+
+## Limitations
+
+- Programs that switch to protected mode themselves without DPMI (raw or
+  VCPI) stop the machine with a monitor panic. VCPI is not planned.
 - Reprogramming the PIC vector base from DOS is not virtualized.
 - A20 is always enabled (programs relying on 1 MB wraparound need LOADFIX).
 
 ## Testing
 
 `tests/mdvmm/run.sh` boots HIMEMX + FreeCOM in QEMU, loads MDVMM from
-AUTOEXEC.BAT and runs V86CHK, XMSTEST and the long filename suite inside the
-virtual machine. Extra QEMU options can be passed in `QEMU_EXTRA`, for
+AUTOEXEC.BAT and runs V86CHK, XMSTEST, the long filename suite and two
+DJGPP programs inside the virtual machine. DJTEST covers libc file I/O with
+long names; DPMITEST covers memory, exceptions as signals, a protected-mode
+IRQ0 handler, a real-mode callback, DOS memory and descriptors. There is no
+CWSDPMI on the test disk. Extra QEMU options can be passed in `QEMU_EXTRA`, for
 example `-d int,cpu_reset -D qemu.log`.

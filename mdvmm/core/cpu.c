@@ -15,10 +15,11 @@ struct idt_entry { uint16_t off_lo, sel; uint8_t zero, type; uint16_t off_hi; } 
 struct dtr { uint16_t limit; uint32_t base; } __attribute__((packed));
 
 static struct tss tss __attribute__((aligned(16)));
-static struct gdt_entry gdt[8] __attribute__((aligned(16)));
+struct gdt_entry gdt_table[8] __attribute__((aligned(16)));
+#define gdt gdt_table
 static struct idt_entry idt[256] __attribute__((aligned(16)));
 
-static void gdt_set(int i, uint32_t base, uint32_t limit, uint8_t access, uint8_t gran)
+void gdt_set(int i, uint32_t base, uint32_t limit, uint8_t access, uint8_t gran)
 {
   gdt[i].limit_lo = limit & 0xffff;
   gdt[i].base_lo = base & 0xffff;
@@ -26,6 +27,19 @@ static void gdt_set(int i, uint32_t base, uint32_t limit, uint8_t access, uint8_
   gdt[i].access = access;
   gdt[i].gran = (gran & 0xf0) | ((limit >> 16) & 0x0f);
   gdt[i].base_hi = base >> 24;
+}
+
+/* load an LDT of `entries` descriptors at linear address base */
+void ldt_load(void *base, uint32_t entries)
+{
+  gdt_set(LDT_SEL >> 3, (uint32_t)base, entries * 8 - 1, 0x82, 0x00);
+  __asm__ volatile("lldt %w0" :: "r"(LDT_SEL));
+}
+
+/* raw descriptor from the GDT, for selector base lookups */
+const void *gdt_entry(uint16_t sel)
+{
+  return &gdt[sel >> 3];
 }
 
 void io_trap(uint16_t port, int trap)
@@ -62,6 +76,7 @@ void cpu_init(void)
   gdt_set(1, 0, 0xfffff, 0x9a, 0xc0);          /* KCODE */
   gdt_set(2, 0, 0xfffff, 0x92, 0xc0);          /* KDATA */
   gdt_set(3, (uint32_t)&tss, sizeof(tss) - 1, 0x89, 0x00);
+  gdt_set(7, 0, 0xfffff, 0x92, 0xc0);          /* ESPFIX_SEL, base set on use */
   d.limit = sizeof(gdt) - 1;
   d.base = (uint32_t)gdt;
   gdt_load(&d);
