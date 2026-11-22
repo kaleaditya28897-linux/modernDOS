@@ -15,7 +15,8 @@
 #   MDVMM NEW BG.BAT + SESSTEST /FG - a second session; the harness presses
 #              Ctrl+Alt+F2/F1
 #   DISKTEST C - the AHCI hard disk (64 MB, MBR, FAT16) as drive C:
-# Afterwards the hard disk image is checked from Linux: fsck, the 1 MB
+#   DISKTEST D - the NVMe disk (96 MB, MBR, FAT16) as drive D:
+# Afterwards both disk images are checked from Linux: fsck, the 1 MB
 # file DISKTEST wrote, FROMDOS.TXT.
 # and leaves FreeCOM at its prompt, where the harness types (QEMU sendkey)
 #   ECHO Typed: aB3!~   and then   A:\POWEROFF
@@ -72,6 +73,9 @@ IF ERRORLEVEL 1 GOTO END
 DIR C:\
 A:\DISKTEST.EXE C
 IF ERRORLEVEL 1 GOTO END
+DIR D:\
+A:\DISKTEST.EXE D
+IF ERRORLEVEL 1 GOTO END
 DIR A:\ /W
 ECHO UEFI BOOT: success
 GOTO PROMPT
@@ -107,21 +111,25 @@ mcopy -i boot.img sesstest.exe ::SESSTEST.EXE
 mcopy -i boot.img bg.bat ::BG.BAT
 mcopy -i boot.img disktest.exe ::DISKTEST.EXE
 
-echo "== building the AHCI hard disk"
-HD_SECTORS=131072
-dd if=/dev/zero of=hd.img bs=512 count=$HD_SECTORS status=none
-python3 - hd.img $HD_SECTORS <<'PY'
+echo "== building the hard disks (AHCI, NVMe)"
+# make_disk image sectors label: MBR with one FAT16 partition from 1MB on,
+# HELLO.TXT written by Linux
+make_disk() {
+  dd if=/dev/zero of="$1" bs=512 count="$2" status=none
+  python3 - "$1" "$2" <<'PY'
 import struct, sys
-# MBR: one FAT16 partition (type 06h) from sector 2048 to the end
 path, total = sys.argv[1], int(sys.argv[2])
 entry = struct.pack("<B3sB3sII", 0, b"\xfe\xff\xff", 0x06, b"\xfe\xff\xff", 2048, total - 2048)
 with open(path, "r+b") as f:
     f.seek(0x1be); f.write(entry)
     f.seek(0x1fe); f.write(b"\x55\xaa")
 PY
-mformat -i hd.img@@1M -T $((HD_SECTORS - 2048)) -h 255 -s 63 -H 2048 -v HARDDISK ::
+  mformat -i "$1@@1M" -T $(($2 - 2048)) -h 255 -s 63 -H 2048 -v "$3" ::
+  mcopy -i "$1@@1M" hello.txt ::HELLO.TXT
+}
 printf 'hello from linux\n' > hello.txt
-mcopy -i hd.img@@1M hello.txt ::HELLO.TXT
+make_disk hd.img 131072 AHCIDISK
+make_disk nvme.img 196608 NVMEDISK
 printf 'hello from linux\n' > linux.txt
 mcopy -i boot.img linux.txt "::Created On Linux.txt"     # LFNTEST fixture
 
@@ -201,6 +209,8 @@ timeout --foreground 180 qemu-system-x86_64 -m 256 -bios "$OVMF" \
   -drive file=esp.img,format=raw,if=ide -net none -display none \
   -device ahci,id=ahci -drive id=hd,file=hd.img,format=raw,if=none \
   -device ide-hd,drive=hd,bus=ahci.0 \
+  -drive id=nv,file=nvme.img,format=raw,if=none \
+  -device nvme,serial=MDNVME01,drive=nv \
   -debugcon file:debug.log -serial file:serial.log -no-reboot \
   -monitor unix:mon.sock,server,nowait $QEMU_EXTRA </dev/null || true
 kill $keys_pid 2>/dev/null || true
@@ -217,7 +227,8 @@ for marker in "MDVMM core:" "bios: disk image" "fbcon:" "v86: entering VM1" \
               "xmstest: 4K round trip" "RESULT: PASSED" "dpmi: 32 bit client" \
               "DJGPP: 0 failures" "DPMI: 0 failures" "vm: session 1 ended" \
               "SESSIONS: 0 failures" "ahci: port 0: QEMU HARDDISK" \
-              "DISKTEST: 0 failures"; do
+              "nvme: namespace 1: 96 MB" "DISKTEST: 0 failures" \
+              "disk test on D:"; do
   if grep -q "$marker" debug.log; then echo "  ok   log: $marker"; else
     echo "  FAIL log missing: $marker"; fail=1; fi
 done
@@ -226,19 +237,27 @@ for marker in "modernDOS kernel" "Hello from DOS on UEFI" "UEFI BOOT: success" \
   if sed 's/\r//g' serial.log | grep -aq "$marker"; then echo "  ok   screen: $marker"; else
     echo "  FAIL screen missing: $marker"; fail=1; fi
 done
-# the hard disk, from Linux
-dd if=hd.img of=part.img bs=512 skip=2048 status=none
-if fsck.fat -n part.img >/dev/null; then echo "  ok   hard disk file system clean"; else
-  echo "  FAIL fsck.fat on the hard disk"; fail=1; fi
-if mtype -i part.img ::FROMDOS.TXT 2>/dev/null | grep -q "written by DOS through AHCI"; then
-  echo "  ok   hard disk: FROMDOS.TXT"; else echo "  FAIL hard disk: FROMDOS.TXT"; fail=1; fi
-mcopy -n -i part.img ::DISKTEST/BIG.BIN big.bin 2>/dev/null || true
-if python3 - big.bin <<'PY'
+# the hard disks, from Linux: check_disk image drive name
+check_disk() {
+  dd if="$1" of=part.img bs=512 skip=2048 status=none
+  if fsck.fat -n part.img >/dev/null; then echo "  ok   $3: file system clean"; else
+    echo "  FAIL $3: fsck.fat"; fail=1; fi
+  if mtype -i part.img ::FROMDOS.TXT 2>/dev/null | grep -q "written by DOS on $2:"; then
+    echo "  ok   $3: FROMDOS.TXT"; else echo "  FAIL $3: FROMDOS.TXT"; fail=1; fi
+  rm -f big.bin
+  mcopy -n -i part.img ::DISKTEST/BIG.BIN big.bin 2>/dev/null || true
+  if python3 - big.bin <<'PY'
 import sys
-d = open(sys.argv[1], "rb").read()
+try:
+    d = open(sys.argv[1], "rb").read()
+except OSError:
+    sys.exit(1)
 want = bytes(((o * 7 + (o >> 9) + (o >> 17)) & 0xff) for o in range(1 << 20))
 sys.exit(0 if d == want else 1)
 PY
-then echo "  ok   hard disk: BIG.BIN pattern (1 MB)"; else
-  echo "  FAIL hard disk: BIG.BIN"; fail=1; fi
+  then echo "  ok   $3: BIG.BIN pattern (1 MB)"; else
+    echo "  FAIL $3: BIG.BIN"; fail=1; fi
+}
+check_disk hd.img C "AHCI disk"
+check_disk nvme.img D "NVMe disk"
 if [ $fail = 0 ]; then echo "UEFI TEST: success"; else echo "UEFI TEST: failure"; exit 1; fi

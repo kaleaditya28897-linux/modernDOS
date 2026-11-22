@@ -108,6 +108,7 @@ void page_free(uint32_t phys);
 uint32_t pages_free(void);
 uint32_t pages_total(void);
 int map_page(uint32_t lin, uint32_t phys, uint32_t flags);
+int map_large_mmio(uint32_t lin, uint64_t phys);
 uint32_t unmap_page(uint32_t lin);
 uint32_t lin_to_pte(uint32_t lin);
 void *kmap(int slot, uint32_t phys);
@@ -173,22 +174,26 @@ uint32_t pci_read32(int bus, int dev, int fn, int reg);
 void pci_write32(int bus, int dev, int fn, int reg, uint32_t v);
 void pci_scan(uint32_t cls, void (*found)(int bus, int dev, int fn));
 void pci_enable(int bus, int dev, int fn);
-void *mmio_map(uint32_t phys, uint32_t size);
+void *mmio_map(uint64_t phys, uint32_t size);
+uint64_t pci_bar(int bus, int dev, int fn, int reg);
 void udelay(uint32_t us);
 
 /* hard disks for the virtual BIOS (INT 13h drives 80h+), from native
    drivers. rw() moves up to DISK_MAX_SECTORS 512-byte sectors between
    the disk and the pages in pages[] (4K each); 0 on success, else an
-   INT 13h error code. */
+   INT 13h error code. flush() (optional) commits the drive's write
+   cache; INT 13h disk resets call it. */
 #define DISK_MAX_SECTORS 128
 struct disk {
   uint64_t sectors;
   char model[41];
   void *drv;
   int (*rw)(struct disk *d, uint64_t lba, uint32_t n, const uint32_t *pages, int write);
+  int (*flush)(struct disk *d);
 };
 void disk_register(struct disk *d);
 void ahci_init(void);
+void nvme_init(void);
 
 /* dma.c */
 void dma_init(void);

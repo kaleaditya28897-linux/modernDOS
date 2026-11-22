@@ -20,7 +20,7 @@ B       = build
 # the DOS core (MDVMM.COM, 64 KB limit) has stubs instead
 COBJS   = $(B)/entry.o $(B)/main.o $(B)/lib.o $(B)/mm.o $(B)/cpu.o $(B)/v86.o $(B)/dpmi.o \
           $(B)/vm.o $(B)/dma.o
-UEFIOBJS = $(B)/bios.o $(B)/fbcon.o $(B)/font.o $(B)/romimg.o $(B)/pci.o $(B)/ahci.o
+UEFIOBJS = $(B)/bios.o $(B)/fbcon.o $(B)/font.o $(B)/romimg.o $(B)/pci.o $(B)/ahci.o $(B)/nvme.o
 DOSOBJS = $(B)/nobios.o
 HDRS    = core/core.h include/bootinfo.h
 

@@ -164,6 +164,12 @@ static int ahci_rw(struct disk *d, uint64_t lba, uint32_t n, const uint32_t *pag
   return command(p, cmd, lba, n, pages, n * 512, write);
 }
 
+static int ahci_flush(struct disk *d)
+{
+  struct port *p = d->drv;
+  return command(p, p->lba48 ? ATA_FLUSH_EXT : 0xe7, 0, 0, 0, 0, 0);
+}
+
 static void copy_model(char *dst, const uint16_t *id)
 {
   int i;
@@ -217,6 +223,7 @@ static void port_init(volatile uint8_t *hba, int n)
 
   p->disk.drv = p;
   p->disk.rw = ahci_rw;
+  p->disk.flush = ahci_flush;
   memcpy(p->disk.model, "SATA disk", 10);
   if (command(p, ATA_IDENTIFY, 0, 0, &id_page, 512, 0))
     return;
@@ -239,20 +246,13 @@ static void port_init(volatile uint8_t *hba, int n)
 
 static void found(int bus, int dev, int fn)
 {
-  uint32_t abar = pci_read32(bus, dev, fn, 0x24);
+  uint64_t abar = pci_bar(bus, dev, fn, 0x24);
   volatile uint8_t *hba;
   uint32_t pi;
   int n;
 
-  if (abar & 1 || (abar & 6) == 4)
-  {
-    if ((abar & 6) == 4 && pci_read32(bus, dev, fn, 0x28))
-    {
-      kprintf("ahci: %02x:%02x.%x: registers above 4GB, skipped\n", bus, dev, fn);
-      return;
-    }
-  }
-  abar &= ~0xfu;
+  if (!abar)
+    return;
   pci_enable(bus, dev, fn);
   hba = mmio_map(abar, 0x1100);
   if (!hba)

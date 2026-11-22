@@ -245,6 +245,8 @@ void vm_tick(struct frame *f)
   ticks++;
   if (nsessions < 2)
     return;
+  if (want == cur || (want >= 0 && !ses[want].used))
+    want = -1;                          /* nothing to switch to */
   if (++slice >= SLICE_TICKS && want < 0)
     want = next_session();
   if (want >= 0 && want != cur && ses[want].used && switchable(1))
@@ -291,7 +293,8 @@ static void set_focus(int n)
   outb(0x3d5, pos >> 8);
   outb(0x3d4, 0x0f);
   outb(0x3d5, pos & 0xff);
-  want = n;
+  if (n != cur)
+    want = n;                           /* show it running soon */
   kprintf("vm: focus session %d\n", n);
 }
 

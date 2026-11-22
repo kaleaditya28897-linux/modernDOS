@@ -78,6 +78,24 @@ int map_page(uint32_t lin, uint32_t phys, uint32_t flags)
   return 1;
 }
 
+/* map 4MB of device registers above 4GB at lin (4MB aligned, unused)
+   with a PSE-36 large page: the PDE holds physical address bits 32-39.
+   Uncached. 0 if the CPU cannot do it. */
+int map_large_mmio(uint32_t lin, uint64_t phys)
+{
+  uint32_t a, b, c, d, cr4;
+
+  __asm__ volatile("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d) : "a"(1));
+  if (!(d & (1u << 3)) || !(d & (1u << 17)) || phys >> 40 || (phys & 0x3fffff) ||
+      (lin & 0x3fffff) || (*pde(lin) & 1))
+    return 0;
+  __asm__ volatile("mov %%cr4,%0" : "=r"(cr4));
+  __asm__ volatile("mov %0,%%cr4" :: "r"(cr4 | 0x10));         /* PSE */
+  *pde(lin) = (uint32_t)phys | ((uint32_t)(phys >> 32) & 0xff) << 13 | 0x9b;   /* PS PCD PWT RW P */
+  invlpg(lin);
+  return 1;
+}
+
 /* unmap a page, returns its physical address (0 if not mapped) */
 uint32_t unmap_page(uint32_t lin)
 {

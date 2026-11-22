@@ -6,7 +6,7 @@
  *  - INT 10h: 80x25 text mode on a RAM screen, drawn on the GOP
  *    framebuffer by fbcon.c (and mirrored to COM1 when present)
  *  - INT 13h: the boot disk image the UEFI loader read from the ESP,
- *    as floppy drive 00h; hard disks 80h+ from native drivers (AHCI),
+ *    as floppy drive 00h; hard disks 80h+ from native drivers (AHCI, NVMe),
  *    with the EDD extensions (41h-48h)
  *  - INT 16h / IRQ1: PS/2 keyboard, scancode set 1
  *  - INT 1Ah / IRQ0: PIT ticks, RTC
@@ -566,7 +566,7 @@ static void int16(struct frame *f)
 }
 
 /* ---------------------------------------------------------------- */
-/* INT 13h: hard disks 80h+ (native drivers: ahci.c)                */
+/* INT 13h: hard disks 80h+ (native drivers: ahci.c, nvme.c)       */
 
 #define MAX_HD     8
 #define HD_HEADS   255
@@ -652,9 +652,14 @@ static void int13_hd(struct frame *f)
   }
   switch (AH(f))
   {
-    case 0x00: case 0x04: case 0x0c: case 0x0d: case 0x10:
+    case 0x00:
+    case 0x0d:                          /* reset: commit the write cache */
+      if (d->flush)
+        err = d->flush(d);
+      break;
+    case 0x04: case 0x0c: case 0x10:
     case 0x11: case 0x14: case 0x44: case 0x47:
-      break;                            /* reset, verify, seek, ready */
+      break;                            /* verify, seek, ready */
     case 0x01:
       AH(f) = hd_status;
       set_flag(f, EFL_CF, hd_status != 0);
@@ -1124,6 +1129,7 @@ void bios_init(void)
   serial_init();
   disk_init();
   ahci_init();
+  nvme_init();
   BDA8(0x75) = (uint8_t)nhd;            /* number of hard disks */
   fbcon_init();
   active = 1;

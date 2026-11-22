@@ -216,7 +216,7 @@ int main(int argc, char **argv)
   h = fopen_rw(p("\\FROMDOS.TXT"), 1);
   if (h >= 0)
   {
-    strcpy(buf, "written by DOS through AHCI\r\n");
+    sprintf(buf, "written by DOS on %c:\r\n", drive);
     frw(h, strlen(buf), 1);
     fclose_h(h);
   }
