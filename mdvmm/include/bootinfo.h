@@ -14,10 +14,12 @@
 #define BP_RAW_TO_PM   2
 #define BP_CALLBACK    3        /* 16 real mode callbacks */
 #define BP_COUNT       19
-#define BOOTINFO_VERSION 4
+#define BOOTINFO_VERSION 5
 
 #define BOOT_DOS   0        /* started from DOS: real BIOS, DOS running */
 #define BOOT_UEFI  1        /* started from UEFI: no BIOS, core boots DOS */
+
+#define BOOTF_DISK_WRITE 0x1   /* UEFI: native hard disks may be written */
 
 #define FB_RGBX    0        /* GOP PixelRedGreenBlueReserved8BitPerColor */
 #define FB_BGRX    1        /* GOP PixelBlueGreenRedReserved8BitPerColor */
@@ -51,6 +53,8 @@ struct bootinfo {
   /* version 4 */
   uint32_t xms_phys;        /* UEFI: DOS extended memory (from 1MB on, */
   uint32_t xms_size;        /* HMA first), physically contiguous */
+  /* version 5 */
+  uint32_t flags;           /* BOOTF_* */
 } __attribute__((packed));
 
 #endif

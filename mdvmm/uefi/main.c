@@ -17,6 +17,7 @@
 #define XMS_MB_MAX    64              /* DOS extended memory */
 #define XMS_MB_MIN    1
 #define BOOT_IMAGE    u"\\MODERNDOS\\BOOT.IMG"
+#define DISK_RW_FILE  u"\\MODERNDOS\\DISKRW"  /* present: disks writable */
 
 extern const uint8_t core_image[], core_image_end[];
 void enter_core(uint64_t low, uint64_t bootinfo, uint64_t pool) __attribute__((noreturn));
@@ -87,6 +88,27 @@ static EFI_STATUS fail(const CHAR16 *what, EFI_STATUS s)
 }
 
 /* read the whole file into pages below 4GB, above the V86 address space */
+/* does the file exist on the boot volume? */
+static int file_exists(EFI_HANDLE image, const CHAR16 *name)
+{
+  EFI_LOADED_IMAGE_PROTOCOL *li;
+  EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *fs;
+  EFI_FILE_PROTOCOL *root, *file;
+
+  if (bs->HandleProtocol(image, &loaded_image_guid, (void **)&li) ||
+      bs->HandleProtocol(li->DeviceHandle, &simple_fs_guid, (void **)&fs) ||
+      fs->OpenVolume(fs, &root))
+    return 0;
+  if (root->Open(root, &file, (CHAR16 *)name, EFI_FILE_MODE_READ, 0))
+  {
+    root->Close(root);
+    return 0;
+  }
+  file->Close(file);
+  root->Close(root);
+  return 1;
+}
+
 static EFI_STATUS load_file(EFI_HANDLE image, const CHAR16 *name, uint64_t *addr, uint64_t *size)
 {
   EFI_LOADED_IMAGE_PROTOCOL *li;
@@ -224,6 +246,10 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *systab)
   bi->core_size = (uint32_t)core_size;
   bi->ramdisk_phys = (uint32_t)rd_addr;
   bi->ramdisk_size = (uint32_t)rd_size;
+  if (file_exists(image, DISK_RW_FILE))
+    bi->flags |= BOOTF_DISK_WRITE;
+  else
+    print(u"Hard disks are read-only (no \\MODERNDOS\\DISKRW).\r\n");
   bi->xms_phys = (uint32_t)xms;
   bi->xms_size = xms_mb << 20;
   find_framebuffer(bi);

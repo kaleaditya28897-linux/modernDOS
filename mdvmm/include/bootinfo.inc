@@ -1,6 +1,6 @@
 ; MDVMM boot information - must match bootinfo.h
 BOOTINFO_MAGIC   equ 0x4D56444D
-BOOTINFO_VERSION equ 4
+BOOTINFO_VERSION equ 5
 BOOT_DOS         equ 0
 BOOT_UEFI        equ 1
 
@@ -39,6 +39,7 @@ struc bootinfo
   .rsdp       resd 1
   .xms_phys   resd 1
   .xms_size   resd 1
+  .flags      resd 1
 endstruc
 
 ; MDVMM INT 2Fh API (AH = MDVMM_MPX)

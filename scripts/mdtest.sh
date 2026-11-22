@@ -5,6 +5,8 @@
 #  - MDVMM supervisor: DOS + tests inside the V86 monitor (tests/mdvmm/run.sh)
 #  - UEFI boot: OVMF -> BOOTX64.EFI -> MDVMM core + virtual BIOS -> DOS
 #    (tests/uefi/run.sh)
+#  - release ISO, if built (scripts/mkiso.sh): UEFI CD/USB, BIOS CD boots
+#    (tests/iso/run.sh)
 . "$(dirname "$0")/mdenv.sh"
 md_run bash -c '
   rc=0
@@ -15,5 +17,8 @@ md_run bash -c '
   tests/lfn/run.sh _output/gcc/kgc8632.sys || rc=1
   tests/mdvmm/run.sh _output/gcc/kgc8632.sys || rc=1
   tests/uefi/run.sh _output/gcc/kgc8632.sys || rc=1
+  for iso in _output/release/*.iso; do
+    [ -f "$iso" ] && { tests/iso/run.sh "$iso" || rc=1; }
+  done
   exit $rc
 '

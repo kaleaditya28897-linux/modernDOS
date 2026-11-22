@@ -12,14 +12,20 @@ INT 21h, INT 2Fh, program loading (EXEC) and the DOS version numbers reported by
 | M1 | Kernel modernization: reproducible container build, QEMU boot tests, native long-filename (LFN) API in the kernel (`docs/lfnapi.txt`) | done |
 | M2 | MDVMM supervisor: 32-bit V86 monitor + DPMI host, multiple DOS sessions (`docs/mdvmm.md`) | done |
 | M3 | UEFI boot with native drivers (GOP display, AHCI/NVMe disks, USB input) | done: DOS boots on UEFI with a virtual BIOS, XMS, DPMI, sessions, AHCI/NVMe disks, USB keyboards (`docs/mdvmm.md`) |
-| M4 | Original desktop GUI + widget toolkit (32-bit DPMI) | planned |
+| M4 | Original desktop GUI + widget toolkit (32-bit DPMI) | in progress: VBE graphics on both boot paths, `mdgui` drawing library (M4.1, `docs/gui.md`) |
 | M5 | Native apps: file manager, editor, settings, terminal (DOS session in a window) | planned |
 | M6 | Networking: TCP/IP, sockets API, package manager, browser | planned |
 
+### Trying it
+Releases have a bootable ISO (alpha, tested in QEMU only): write it to a
+USB stick with a raw image writer and boot a UEFI PC with Secure Boot
+off, or boot it from CD on a BIOS PC. See `release/README.TXT`.
+
 ### Building (Linux, needs podman)
 ```
-scripts/mdbuild.sh      # builds the GCC (reference) and Open Watcom kernels, MDVMM.COM, BOOTX64.EFI
-scripts/mdtest.sh       # QEMU: boot tests, LFN API + DJGPP libc, MDVMM (DPMI, sessions), UEFI boot
+scripts/mdbuild.sh      # builds the GCC (reference) and Open Watcom kernels, MDVMM.COM, BOOTX64.EFI, mdgui
+scripts/mkiso.sh        # the release ISO: _output/release/modernDOS-<version>.iso
+scripts/mdtest.sh       # QEMU: boot tests, LFN API + DJGPP libc, MDVMM (DPMI, sessions, graphics), UEFI boot, ISO
 ```
 
 The upstream FreeDOS README follows.

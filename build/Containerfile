@@ -35,9 +35,9 @@ RUN mkdir -p /opt/fdos && cd /opt/fdos \
       curl -fsSL -o $p.zip https://www.ibiblio.org/pub/micro/pc-stuff/freedos/files/repositories/1.4/base/$p.zip \
       && unzip -q -o -LL $p.zip && rm $p.zip; done
 
-# UEFI firmware for the M3 UEFI boot tests (x64 OVMF)
+# UEFI firmware for the UEFI boot tests (x64 OVMF), xorriso for the release ISO
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ovmf \
+ && apt-get install -y --no-install-recommends ovmf xorriso \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src

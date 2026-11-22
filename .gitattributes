@@ -10,3 +10,5 @@ tests/lfn/*.sh text eol=lf
 tests/mdvmm/*.sh text eol=lf
 tests/uefi/*.sh text eol=lf
 mdvmm/** text eol=lf
+release/*.sh text eol=lf
+tests/iso/*.sh text eol=lf
