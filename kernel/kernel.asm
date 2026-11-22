@@ -628,20 +628,6 @@ _winStartupInfo:
 global _winseg1
 _winseg1:	dw 0
  %endif
-instance_table: ; should include stacks, Win may auto determine SDA region
-                ; we simply include whole DOS data segment
- %ifnidni __OUTPUT_FORMAT__, elf
-                dw seg _DATASTART, 0 ; [SEG:OFF] address of region's base
-                dw _markEndInstanceData wrt seg _DATASTART ; size in bytes
- %else
-global _winseg2
-_winseg2:	dw 0
-                dw 0 ; [SEG:OFF] address of region's base
-global _winseg3
-_winseg3:	dw 0 ; size in bytes
- %endif
-                dd 0 ; 0 marks end of table
-                dw 0 ; and 0 length for end of instance_table entry
                 global  _winPatchTable
 _winPatchTable: ; returns offsets to various internal variables
                 dw 0x0006      ; DOS version, major# in low byte, eg. 6.00
@@ -675,6 +661,9 @@ _firstsftt:
 
                 global  MARK01FBH
 MARK01FBH       equ     $
+                global  inst_sda_start, _inst_sda_start
+inst_sda_start:                         ; instance data: SDA and the
+_inst_sda_start:                        ; preceding console/readline data
                 global  _local_buffer   ; local_buffer is 256 bytes long
                                         ; so it overflows into kb_buf!!
         ; only when kb_buf is used, local_buffer is limited to 128 bytes.
@@ -959,6 +948,37 @@ _VirtOpen       db      0               ;782 - virtual open flag
 absrdwrflg		db 		0				;7bbh - 0=int 25h/26h absolute read/write, 1=int 21h/ax=7305h
 				times 12 dw 0           ;7bch to 7d2h, high word of 32bit values, see offsets 0x 2a2, 29c, 2bc, 29a, 276, 244, & registers ebx,edx,edi,ecx
 				times  3 dw 0           ; ???
+                global  inst_sda_end, _inst_sda_end
+inst_sda_end:
+_inst_sda_end:
+
+%IFDEF WIN31SUPPORT
+                ; (not with the startup info: DS:00CCh is fixed)
+instance_table: ; per virtual machine data, swapped by the supervisor on
+                ; every VM switch. Only what one VM may leave behind while
+                ; it is outside a DOS critical section (INT 2Ah 80h/82h):
+                ; the swappable data area with the DOS stacks, and the
+                ; private stacks of the built-in drivers and INT 2Fh.
+                ; Global structures (LoL, SFTs, buffers, DPBs) must not be
+                ; instanced: a VM switch would restore stale copies.
+                ; entries: DWORD far pointer (offset, segment), WORD size
+ %ifnidni __OUTPUT_FORMAT__, elf
+                dw inst_sda_start wrt seg _DATASTART, seg _DATASTART
+                dw inst_sda_end - inst_sda_start
+                dw inst_stk_start wrt seg _DATASTART, seg _DATASTART
+                dw inst_stk_end - inst_stk_start
+                dw inst_p0_start wrt seg _DATASTART, seg _DATASTART
+                dw _p_0_tos - inst_p0_start
+ %else
+global _winInstTable    ; offsets and segments filled in at run time
+_winInstTable:
+                dw 0, 0, inst_sda_end - inst_sda_start
+                dw 0, 0, inst_stk_end - inst_stk_start
+                dw 0, 0, _p_0_tos - inst_p0_start
+ %endif
+                dd 0 ; 0 marks end of table
+                dw 0 ; and 0 length for end of instance_table entry
+%ENDIF ; WIN31SUPPORT
 
 ;
 ; end of controlled variables
@@ -991,6 +1011,9 @@ __init_end:
 init_end:        
 
 segment _DATA
+                global  inst_stk_start, _inst_stk_start
+inst_stk_start:                         ; instance data: private stacks
+_inst_stk_start:
 ; blockdev private stack
                 global  blk_stk_top
                 times 256 dw 0
@@ -1005,6 +1028,8 @@ clk_stk_top:
                 global  int2f_stk_top
                 times 128 dw 0
 int2f_stk_top:
+                global  inst_stk_end
+inst_stk_end:
 
 ; Dynamic data:
 ; member of the DOS DATA GROUP
@@ -1020,6 +1045,9 @@ _swap_indos:
 ; _swap_indos but only if int2a ah=80/81 (critical section start/end)
 ; are called upon entry and exit of the device drivers
 
+                global  inst_p0_start, _inst_p0_start
+inst_p0_start:
+_inst_p0_start:
                 times 96 dw 0x9090 ; Process 0 Stack
                 global  _p_0_tos
 _p_0_tos:

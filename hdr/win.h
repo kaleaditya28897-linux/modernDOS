@@ -19,9 +19,15 @@ struct WinStartupInfo
 };
 extern struct WinStartupInfo winStartupInfo;
 #if defined __GNUC__
-extern UWORD winseg1, winseg2, winseg3;
-extern UBYTE markEndInstanceData;
-extern struct lol FAR ASM DATASTART;
+extern UWORD winseg1;
+/* instance data table: far pointer + size per entry, the pointers are
+   filled in at run time (startup broadcast) */
+struct WinInstance
+{
+  UWORD off, seg, size;
+};
+extern struct WinInstance winInstTable[3];
+extern UBYTE inst_sda_start, inst_stk_start, inst_p0_start;
 #endif
 
 

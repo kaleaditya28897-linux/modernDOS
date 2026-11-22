@@ -8,6 +8,8 @@
 #   LFNTEST  - the full long filename suite (heavy INT 21h, timer, disk)
 #   DJTEST   - DJGPP libc long filename test, using MDVMM as DPMI host
 #   DPMITEST - DPMI host test: memory, exceptions, IRQ0, callbacks, ...
+#   MDVMM NEW BG.BAT + SESSTEST /FG - a second DOS session runs a background
+#              job while session 0 checks preemption, hotkeys and results
 # There is no CWSDPMI on the disk: DJGPP programs must use MDVMM.
 # MDVMM and the tests log to the QEMU debug console.
 #
@@ -28,6 +30,7 @@ for p in v86chk poweroff xmstest; do
   "$NASM" -f bin -o "$WORK/$p.com" "$HERE/$p.asm"
 done
 ia16-elf-gcc -mcmodel=small -Os -o "$WORK/lfntest.exe" "$ROOT/tests/lfn/lfntest.c" -li86
+ia16-elf-gcc -mcmodel=small -Os -o "$WORK/sesstest.exe" "$HERE/sesstest.c" -li86
 DJGPP=/opt/djgpp/bin/i586-pc-msdosdjgpp-gcc
 "$DJGPP" -O2 -o "$WORK/djtest.exe" "$ROOT/tests/lfn/djtest.c"
 "$DJGPP" -O2 -o "$WORK/dpmitest.exe" "$HERE/dpmitest.c"
@@ -51,11 +54,16 @@ A:\DJTEST.EXE
 IF ERRORLEVEL 1 GOTO END
 A:\DPMITEST.EXE
 IF ERRORLEVEL 1 GOTO END
+A:\MDVMM.COM NEW A:\BG.BAT
+IF ERRORLEVEL 1 GOTO END
+A:\SESSTEST.EXE /FG
+IF ERRORLEVEL 1 GOTO END
 ECHO success>A:\RESULT.TXT
 :END
 A:\POWEROFF.COM
 EOF
 sed -i 's/$/\r/' autoexec.bat
+printf '@ECHO OFF\r\nA:\\SESSTEST.EXE /BG\r\nECHO done>A:\\BGDONE.TXT\r\n' > bg.bat
 
 "$NASM" "$TEST/ldosboot/boot.asm" -w-user -I"$TEST/lmacros/" \
   -D_COMPAT_FREEDOS=1 -D_LBA=0 -D_USE_PART_INFO=0 -D_QUERY_GEOMETRY=0 \
@@ -78,13 +86,46 @@ mcopy -i disk.img poweroff.com ::POWEROFF.COM
 mcopy -i disk.img lfntest.exe ::LFNTEST.EXE
 mcopy -i disk.img djtest.exe ::DJTEST.EXE        # note: no CWSDPMI on this disk
 mcopy -i disk.img dpmitest.exe ::DPMITEST.EXE
+mcopy -i disk.img sesstest.exe ::SESSTEST.EXE
+mcopy -i disk.img bg.bat ::BG.BAT
 printf 'hello from linux\n' > linux.txt
 mcopy -i disk.img linux.txt "::Created On Linux.txt"
 
 echo "== booting in QEMU"
+# session hotkeys: once the sessions test runs, press Ctrl+Alt+F2 and
+# Ctrl+Alt+F1 alternately through the QEMU monitor
+python3 - "$WORK" <<'PY' &
+import os, socket, sys, time
+work = sys.argv[1]
+log, sock = os.path.join(work, "debug.log"), os.path.join(work, "mon.sock")
+deadline = time.time() + 170
+while time.time() < deadline:
+    try:
+        if b"sessions test" in open(log, "rb").read():
+            break
+    except OSError:
+        pass
+    time.sleep(0.2)
+keys = ["ctrl-alt-f2", "ctrl-alt-f1"]
+i = 0
+while time.time() < deadline:
+    try:
+        s = socket.socket(socket.AF_UNIX)
+        s.connect(sock)
+        s.sendall(("sendkey %s\n" % keys[i % 2]).encode())
+        time.sleep(0.2)
+        s.close()
+    except OSError:
+        break
+    i += 1
+    time.sleep(1.5)
+PY
+keys_pid=$!
 timeout --foreground 180 "$QEMU" -m 64 \
   -drive file=disk.img,format=raw,if=floppy -display none \
-  -debugcon file:debug.log -no-reboot $QEMU_EXTRA </dev/null || true
+  -debugcon file:debug.log -no-reboot \
+  -monitor unix:mon.sock,server,nowait $QEMU_EXTRA </dev/null || true
+kill $keys_pid 2>/dev/null || true
 sed 's/\r$//' debug.log
 
 echo "== checks"
@@ -93,7 +134,9 @@ result=$(mtype -i disk.img ::RESULT.TXT 2>/dev/null | tr -d '\r\n' || true)
 [ "$result" = success ] || { echo "  FAIL RESULT.TXT says '$result'"; fail=1; }
 for marker in "MDVMM core:" "v86: entering VM1" "v86chk: protected mode bit set" \
               "xmstest: 4K round trip" "RESULT: PASSED" "dpmi: 32 bit client" \
-              "DJGPP: 0 failures" "DPMI: 0 failures"; do
+              "DJGPP: 0 failures" "DPMI: 0 failures" "vm: sessions enabled" \
+              "vm: session 1 started" "vm: focus session 1" "vm: session 1 ended" \
+              "SESSIONS: 0 failures"; do
   if grep -q "$marker" debug.log; then echo "  ok   log: $marker"; else
     echo "  FAIL log missing: $marker"; fail=1; fi
 done

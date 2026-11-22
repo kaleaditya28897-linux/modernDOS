@@ -24,6 +24,14 @@ ALLCFLAGS+=-DWITHFAT32 -DWITHLFNAPI
 NASMFLAGS+=-DWITHFAT32
 endif
 
+# Windows/MDVMM enhanced mode support: INT 2Fh AX=1605h startup broadcast
+# with the DOS instance data table, INT 2Ah critical section signals.
+# Inert until a supervisor announces itself through the broadcast.
+ifeq ($(XFAT),32)
+ALLCFLAGS+=-DWIN31SUPPORT
+NASMFLAGS+=-DWIN31SUPPORT
+endif
+
 NASM=$(XNASM)
 NASMFLAGS+=-i../hdr/ -DXCPU=$(XCPU) -felf
 

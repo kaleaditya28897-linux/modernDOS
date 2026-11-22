@@ -370,11 +370,6 @@ int21_onerrorstack:
 
                 
 int21_2:
-%IFDEF WIN31SUPPORT     ; begin critical section
-                        ; should be called as needed, but we just
-                        ; mark the whole int21 api as critical
-                call begin_dos_crit_sect
-%ENDIF ; WIN31SUPPORT
                 inc     byte [_InDOS]
                 mov     cx,_char_api_tos
                 or      ah,ah   
@@ -387,9 +382,14 @@ int21_2:
                 jbe     int21_normalentry
 
 int21_3:
-%IFNDEF WIN31SUPPORT
+%IFDEF WIN31SUPPORT     ; begin critical section: everything but the
+                        ; character I/O functions (01h-0Ch), which only
+                        ; use per-VM (instance) data and may block for
+                        ; keyboard input, so a supervisor can switch VMs
+                call begin_dos_crit_sect
+%ELSE
                 call    end_dos_crit_sect
-%ENDIF ; NOT WIN31SUPPORT
+%ENDIF ; WIN31SUPPORT
                 mov     cx,_disk_api_tos
 
 int21_normalentry:

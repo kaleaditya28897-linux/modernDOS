@@ -55,7 +55,13 @@ main:
         jc      err_386
         smsw    ax
         test    al, 1
-        jnz     err_pm
+        jz      .not_loaded
+        mov     ax, MDVMM_MPX << 8      ; already running under MDVMM?
+        int     2fh
+        cmp     bx, MDVMM_SIGNATURE
+        jne     err_pm
+        jmp     command                 ; yes: MDVMM NEW ...
+.not_loaded:
 
         ; XMS driver
         mov     ax, 4300h
@@ -203,12 +209,180 @@ resumed:
         mov     dx, msg_active
         call    print
 
-        mov     es, [2ch]               ; free the environment
-        mov     ah, 49h
+        ; Everything below the end of this resident block is global to
+        ; all DOS sessions, memory above is per session. Round the block
+        ; up so that the boundary is page aligned. (The environment is
+        ; kept: freeing it would leave a free hole in global memory.)
+        mov     ax, cs
+        add     ax, (resident_end - $$ + 100h + 15) >> 4
+        add     ax, 0ffh
+        xor     al, al                  ; next 4K boundary (256 paragraphs)
+        mov     [reg_boundary], ax
+        mov     bx, cs
+        sub     ax, bx
+        mov     [resident_paras], ax
+
+        ; per session DOS data for the monitor
+        push    es
+        mov     ah, 34h                 ; InDOS flag
         int     21h
-        mov     dx, (resident_end - $$ + 100h + 15) >> 4
+        mov     [reg_indos], bx
+        mov     [reg_indos + 2], es
+        mov     ah, 52h                 ; list of lists: CDS array
+        int     21h
+        mov     ax, [es:bx + 16h]
+        mov     [reg_cds], ax
+        mov     ax, [es:bx + 18h]
+        mov     [reg_cds + 2], ax
+        mov     al, [es:bx + 21h]       ; LASTDRIVE
+        mov     ah, 58h                 ; bytes per CDS entry
+        mul     ah
+        mov     [reg_cds_size], ax
+        ; enhanced mode startup broadcast: the kernel (and TSRs) answer
+        ; with their instance data tables
+        push    ds
+        xor     bx, bx
+        mov     es, bx
+        mov     ds, bx
+        xor     si, si
+        xor     cx, cx
+        xor     dx, dx                  ; enhanced mode
+        mov     di, 030ah               ; "Windows 3.10"
+        mov     ax, 1605h
+        int     2fh
+        pop     ds
+        mov     [reg_sis], bx
+        mov     [reg_sis + 2], es
+        pop     es
+        test    cx, cx
+        jnz     .no_sessions            ; someone vetoed
+        mov     ax, (MDVMM_MPX << 8) | 04h   ; register session data
+        mov     dx, reg_block
+        int     2fh
+        jc      .no_sessions
+        jmp     .tsr
+.no_sessions:
+        mov     dx, msg_nosess
+        call    print
+.tsr:
+        mov     dx, [resident_paras]
         mov     ax, 3100h               ; stay resident
         int     21h
+
+; ----------------------------------------------------------------------
+; MDVMM NEW [command]: start a DOS session running COMSPEC (/C command)
+command:
+        mov     si, 81h
+        call    skip_spaces
+        mov     di, kw_new
+        mov     cx, 3
+.cmp:   lodsb
+        and     al, 0dfh                ; upper case
+        scasb
+        jne     usage
+        loop    .cmp
+        call    skip_spaces
+        ; command tail for COMSPEC: " /C <command>" or empty
+        mov     di, tail + 1
+        cmp     byte [si], 13
+        je      .tail_done
+        mov     ax, '/' | (' ' << 8)
+        mov     byte [di], ' '
+        inc     di
+        mov     word [di], 'C' * 256 + '/'
+        add     di, 2
+        mov     byte [di], ' '
+        inc     di
+.copy:  lodsb
+        cmp     al, 13
+        je      .tail_done
+        stosb
+        cmp     di, tail + 126
+        jb      .copy
+.tail_done:
+        mov     byte [di], 13
+        mov     ax, di
+        sub     ax, tail + 1
+        mov     [tail], al
+        call    find_comspec            ; DS:DX -> program
+        jc      err_comspec
+
+        ; release memory above the transient code, so the new session
+        ; has room to run the shell
+        mov     bx, (transient_end - $$ + 100h + 15) >> 4
+        mov     ah, 4ah
+        int     21h
+        mov     sp, transient_end - 2
+
+        mov     ax, (MDVMM_MPX << 8) | 02h   ; fork a new session
+        int     2fh
+        jc      err_new
+        test    ax, ax
+        jz      .child
+        mov     dx, msg_started         ; parent: done
+        call    print
+        mov     ax, 4c00h
+        int     21h
+.child:                                 ; new session: run the shell
+        mov     word [epb], 0           ; inherit environment
+        mov     word [epb + 2], tail
+        mov     [epb + 4], cs
+        mov     word [epb + 6], 5ch
+        mov     [epb + 8], cs
+        mov     word [epb + 10], 6ch
+        mov     [epb + 12], cs
+        mov     dx, [comspec_ptr]
+        push    ds
+        mov     ds, [comspec_ptr + 2]
+        mov     bx, epb
+        push    cs
+        pop     es
+        mov     ax, 4b00h
+        int     21h
+        pop     ds
+        mov     ax, (MDVMM_MPX << 8) | 03h   ; end this session
+        int     2fh
+        jmp     $                       ; not reached
+
+skip_spaces:
+        cmp     byte [si], ' '
+        jne     .done
+        inc     si
+        jmp     skip_spaces
+.done:  ret
+
+; COMSPEC from the environment -> comspec_ptr; CF if not found
+find_comspec:
+        push    es
+        mov     es, [2ch]
+        xor     di, di
+.var:   cmp     byte [es:di], 0
+        je      .none
+        mov     si, kw_comspec
+        mov     bx, di
+        mov     cx, 8
+        repe    cmpsb
+        je      .found
+        mov     di, bx
+.skip:  inc     di
+        cmp     byte [es:di - 1], 0
+        jne     .skip
+        jmp     .var
+.found: mov     [comspec_ptr], di
+        mov     [comspec_ptr + 2], es
+        pop     es
+        clc
+        ret
+.none:  pop     es
+        stc
+        ret
+
+usage:      mov     dx, msg_usage
+            jmp     fail
+err_comspec: mov    dx, msg_comspec
+            jmp     fail
+err_new:    mov     dx, msg_new
+            jmp     fail
 
 ; ----------------------------------------------------------------------
 
@@ -275,6 +449,26 @@ msg_mem     db  'Not enough free extended memory.', 13, 10, '$'
 msg_lock    db  'Could not lock extended memory.', 13, 10, '$'
 msg_copy    db  'Could not copy the monitor to extended memory.', 13, 10, '$'
 msg_resume  db  'Monitor did not answer after start.', 13, 10, '$'
+msg_nosess  db  'DOS kernel does not support sessions (no instance data).', 13, 10, '$'
+msg_usage   db  'Usage: MDVMM            load the monitor', 13, 10
+            db  '       MDVMM NEW [cmd]  start a DOS session (Ctrl+Alt+F1..F4 switch)', 13, 10, '$'
+msg_comspec db  'COMSPEC not set.', 13, 10, '$'
+msg_new     db  'Could not start a session.', 13, 10, '$'
+msg_started db  'DOS session started.', 13, 10, '$'
+kw_new      db  'NEW'
+kw_comspec  db  'COMSPEC='
+
+; session registration block (INT 2Fh AX=DE04h, DS:DX)
+reg_block:
+reg_sis         dd  0                   ; startup info chain (1605h)
+reg_indos       dd  0                   ; InDOS flag
+reg_cds         dd  0                   ; CDS array
+reg_cds_size    dw  0
+reg_boundary    dw  0                   ; first per-session paragraph
+resident_paras  dw  0
+comspec_ptr     dd  0
+epb             times 14 db 0           ; EXEC parameter block
+tail            times 128 db 0          ; command tail
 
         align   4
 xms_entry   dd  0
@@ -301,6 +495,7 @@ bi          times bootinfo_size db 0
         align   16
             times 512 db 0
 pm_stack_top:
+transient_end:                          ; MDVMM NEW keeps memory up to here
 
         align   16
 core_image:

@@ -966,6 +966,11 @@ void dpmi_v86_bp(struct frame *v, int bp)
 /* ---------------------------------------------------------------- */
 /* interrupts and exceptions from the client                        */
 
+int dpmi_active(void)
+{
+  return cl.active;
+}
+
 /* real mode INT 21h AH=4Ch while a client is active (e.g. via 0300h) */
 void dpmi_rm_exit(void)
 {

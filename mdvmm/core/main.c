@@ -10,6 +10,7 @@ void trap_dispatch(struct frame *f)
 
   if (f->vector >= 0x20 && f->vector < 0x30)
   {
+    dma_irq();                  /* bounced DMA data before any handler */
     if (user)
       dpmi_irq(f, (int)f->vector - 0x20);
     else
@@ -41,6 +42,7 @@ void core_main(struct bootinfo *bi, uint32_t free_phys)
 
   mm_init(free_phys);
   cpu_init();
+  dma_init();
   dpmi_init();
   v86_start();
 }

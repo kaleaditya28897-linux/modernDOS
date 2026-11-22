@@ -117,6 +117,23 @@ void mm_init(uint32_t free_phys)
           (pool_end - next_free) / 1024);
 }
 
+/* physically contiguous, size aligned block below 16MB (ISA DMA), taken
+   from the untouched part of the pool; call early. 0 if not possible. */
+uint32_t page_alloc_isa(uint32_t size)
+{
+  uint32_t p = (next_free + size - 1) & ~(size - 1);
+
+  if (p + size > pool_end || p + size > 0x1000000)
+    return 0;
+  while (next_free < p)                 /* skipped pages stay usable */
+  {
+    page_free(next_free);
+    next_free += 4096;
+  }
+  next_free = p + size;
+  return p;
+}
+
 /* map a physical page into a temporary window slot */
 void *kmap(int slot, uint32_t phys)
 {

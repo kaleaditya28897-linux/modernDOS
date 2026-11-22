@@ -10,13 +10,18 @@ and several DOS sessions.
 |---|---|
 | M2.1 V86 monitor | working: DOS, FreeCOM, XMS, disk, timer, keyboard controller under the monitor |
 | M2.2 DPMI host | working: DPMI 0.9 for 16/32 bit clients; DJGPP programs run without CWSDPMI |
-| M2.3 multiple DOS sessions | planned |
+| M2.3 multiple DOS sessions | working: up to 4 preemptively scheduled DOS sessions, Ctrl+Alt+F1..F4 |
 
 ## Using it
 
 ```
 DEVICE=HIMEMX.EXE        (CONFIG.SYS: any XMS driver)
 MDVMM                    (AUTOEXEC.BAT or prompt)
+```
+
+```
+MDVMM NEW [command]      start another DOS session running COMSPEC
+                         (/C command); Ctrl+Alt+F1..F4 switch the screen
 ```
 
 MDVMM takes a 32 MB pool from XMS (less if less is free), moves itself there
@@ -36,6 +41,9 @@ mode (EMM386, JemmEx, another MDVMM).
   - `cpu.c` - GDT, IDT, TSS with I/O permission bitmap, PIC remapped to 20h
   - `mm.c` - pool allocator, temporary physical mappings
   - `v86.c` - the monitor
+  - `dpmi.c` - DPMI host
+  - `vm.c` - DOS sessions
+  - `dma.c` - ISA DMA virtualization
 - The loader and the core share `struct bootinfo` (`mdvmm/include`).
 
 V86 mode runs with IOPL 0. CLI, STI, PUSHF, POPF, INT, IRET and HLT trap into
@@ -52,6 +60,12 @@ Intercepted services:
 | ports 60h, 64h, 92h | A20 stays enabled: A20 commands are swallowed, other traffic passes through |
 | INT 2Fh AX=DE00h | installation check: AL=FFh, BX=4D44h ("MD"), CX=API version |
 | INT 2Fh AX=DE01h | write the ASCIZ string at DS:DX to the monitor log |
+| INT 2Fh AX=DE02h | fork the running session (parent: AX=new session, child: AX=0, BX=number) |
+| INT 2Fh AX=DE03h | end the running session (not session 0) |
+| INT 2Fh AX=DE04h | loader registers the per-session DOS data (internal) |
+| INT 2Fh AX=DE05h | set focus: BL=session |
+| INT 2Fh AX=DE06h | AX=running session, BX=focused session, CX=number of sessions |
+| ports 00-0F, C0-DF, 81-8F | ISA DMA controllers, virtualized (see below) |
 
 The monitor logs to I/O port E9h (QEMU `-debugcon`, Bochs).
 
@@ -87,19 +101,64 @@ the monitor's stack address.
 Not yet: DPMI 1.0 functions, several clients at once (a DPMI program
 starting another one), virtual memory.
 
+## DOS sessions
+
+All sessions share one DOS kernel, as in Windows 386 enhanced mode.
+`MDVMM NEW` forks the running session in the monitor and the child EXECs
+COMSPEC; session 0 is the original DOS.
+
+- Memory below the end of MDVMM's resident block (rounded up to 4K) is
+  global: kernel, drivers, TSRs loaded before MDVMM. From there to 640K
+  each session has private pages.
+- Instance data is swapped on every switch: IVT, BIOS data area and
+  500h area, the CDS array and the kernel's instance table from the
+  INT 2Fh AX=1605h startup broadcast (the swappable data area with the
+  DOS stacks, and the private stacks of the built-in drivers and INT 2Fh).
+  Global kernel structures (SFTs, buffers, DPBs) are not instanced.
+- The kernel is built with WIN31SUPPORT: INT 21h functions other than
+  character I/O (01h-0Ch) run inside an INT 2Ah critical section, and the
+  monitor never switches sessions inside one.
+- Scheduling: round robin, 2 timer ticks per slice; a session that idles
+  (INT 28h, INT 2Fh AX=1680h, HLT) yields at once. Missed timer ticks are
+  added to the BIOS tick count when a session runs again.
+- All hardware interrupts go to the running session. Keystrokes for a
+  focused session that is not running are queued and replayed.
+- Text mode video: the focused session owns B8000h, the others write to
+  shadow pages.
+- INT 15h AH=87h block moves translate addresses below 110000h through
+  the running session's page tables (XMS moves into private memory).
+
+### ISA DMA
+
+The 8237 controllers use physical addresses, so the monitor owns them.
+It keeps a shadow of each channel and programs the real controller
+itself: unchanged for identity mapped memory, translated for physically
+contiguous memory, otherwise through a 128 KB bounce buffer below 16 MB.
+Device->memory data is copied out of the bounce buffer at every hardware
+interrupt before any handler runs, when the channel is masked and when
+the status register is read. Reads of the current address are translated
+back. DPMI clients (IOPL 3) program the controller directly.
+
 ## Limitations
 
 - Programs that switch to protected mode themselves without DPMI (raw or
   VCPI) stop the machine with a monitor panic. VCPI is not planned.
 - Reprogramming the PIC vector base from DOS is not virtualized.
 - A20 is always enabled (programs relying on 1 MB wraparound need LOADFIX).
+- Sessions: no switching while a DPMI client runs; a DPMI client doing
+  its own DMA in a session other than 0 gets wrong addresses; graphics
+  modes are not virtualized (the focused session owns the screen only in
+  text mode); the BIOS is assumed to keep its state in the BIOS data area.
 
 ## Testing
 
 `tests/mdvmm/run.sh` boots HIMEMX + FreeCOM in QEMU, loads MDVMM from
 AUTOEXEC.BAT and runs V86CHK, XMSTEST, the long filename suite and two
-DJGPP programs inside the virtual machine. DJTEST covers libc file I/O with
-long names; DPMITEST covers memory, exceptions as signals, a protected-mode
-IRQ0 handler, a real-mode callback, DOS memory and descriptors. There is no
-CWSDPMI on the test disk. Extra QEMU options can be passed in `QEMU_EXTRA`, for
-example `-d int,cpu_reset -D qemu.log`.
+DJGPP programs inside the virtual machine, then starts a second session
+(`MDVMM NEW BG.BAT`) and runs SESSTEST in both: preemption while session 0
+never yields, Ctrl+Alt+F2/F1 (sent through the QEMU monitor), the floppy
+DMA bounce path and file contents written by both sessions. DJTEST
+covers libc file I/O with long names; DPMITEST covers memory, exceptions
+as signals, a protected-mode IRQ0 handler, a real-mode callback, DOS
+memory and descriptors. There is no CWSDPMI on the test disk. Extra QEMU
+options can be passed in `QEMU_EXTRA`, for example `-d int,cpu_reset -D qemu.log`.

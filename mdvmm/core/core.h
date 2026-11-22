@@ -84,6 +84,7 @@ void panic_frame(struct frame *f, const char *why) __attribute__((noreturn));
 extern struct bootinfo boot;
 void mm_init(uint32_t free_phys);
 uint32_t page_alloc(void);                   /* 0 if none */
+uint32_t page_alloc_isa(uint32_t size);
 void page_free(uint32_t phys);
 uint32_t pages_free(void);
 uint32_t pages_total(void);
@@ -111,6 +112,7 @@ void v86_start(void);
 void v86_exception(struct frame *f);
 void v86_irq(struct frame *f, int irq);
 void v86_reflect(struct frame *f, uint8_t vec);
+void v86_deliver(struct frame *f);
 void v86_push16(struct frame *f, uint16_t v);
 uint16_t v86_pop16(struct frame *f);
 uint32_t v86_vflags(struct frame *f);
@@ -124,6 +126,23 @@ void dpmi_irq(struct frame *f, int irq);
 int dpmi_irq_v86(struct frame *v, int irq);
 int dpmi_take_pending(struct frame *pm);
 void dpmi_rm_exit(void);
+int dpmi_active(void);
+
+/* vm.c */
+void vm_tick(struct frame *f);
+void vm_poll(struct frame *f);
+void vm_yield(struct frame *f);
+int vm_kbd(struct frame *f);
+int vm_port60(uint8_t *v);
+int vm_api(struct frame *f);
+void vm_crit(struct frame *f);
+
+/* dma.c */
+void dma_init(void);
+int dma_port(uint16_t port);
+uint8_t dma_in(uint16_t port);
+void dma_out(uint16_t port, uint8_t v);
+void dma_irq(void);
 
 /* entry.asm */
 extern const uint32_t isr_table[256];

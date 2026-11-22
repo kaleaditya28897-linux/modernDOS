@@ -9,11 +9,11 @@ NASM    = nasm
 CFLAGS  = -m32 -std=gnu11 -O2 -Wall -Wextra -Werror \
           -ffreestanding -fno-builtin -fno-pic -fno-pie -fno-stack-protector \
           -fno-delete-null-pointer-checks -fno-strict-aliasing -fno-asynchronous-unwind-tables \
-          -mgeneral-regs-only -Iinclude -Icore
+          -mgeneral-regs-only --param=min-pagesize=0 -Iinclude -Icore
 NFLAGS  = -Iinclude/
 
 B       = build
-COBJS   = $(B)/entry.o $(B)/main.o $(B)/lib.o $(B)/mm.o $(B)/cpu.o $(B)/v86.o $(B)/dpmi.o
+COBJS   = $(B)/entry.o $(B)/main.o $(B)/lib.o $(B)/mm.o $(B)/cpu.o $(B)/v86.o $(B)/dpmi.o $(B)/vm.o $(B)/dma.o
 HDRS    = core/core.h include/bootinfo.h
 
 all: $(B)/MDVMM.COM

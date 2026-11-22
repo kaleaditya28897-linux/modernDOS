@@ -98,7 +98,7 @@ static uint8_t irq_vector(int irq)
 }
 
 /* deliver the highest priority pending IRQ if the VM accepts interrupts */
-static void deliver_pending(struct frame *f)
+void v86_deliver(struct frame *f)
 {
   static const uint8_t prio[16] = { 0, 1, 8, 9, 10, 11, 12, 13, 14, 15, 3, 4, 5, 6, 7, 2 };
   int i;
@@ -124,19 +124,33 @@ void v86_irq(struct frame *f, int irq)
   /* from the monitor itself (HLT wait): just record it */
   if (!(f->eflags & EFL_VM))
     return;
-  deliver_pending(f);
+  if (irq == 1 && vm_kbd(f))
+    return;
+  if (irq == 0)
+    vm_tick(f);                 /* may switch sessions */
+  v86_deliver(f);
 }
 
 /* emulate HLT: wait for an interrupt the VM will accept */
 static void halt(struct frame *f)
 {
+  vm_yield(f);                  /* another session may run instead */
   while (!(vm1.vif && vm1.pending))
     __asm__ volatile("sti; hlt; cli" ::: "memory");
-  deliver_pending(f);
+  v86_deliver(f);
 }
 
 /* ---------------------------------------------------------------- */
 /* intercepted software interrupts                                  */
+
+/* physical address of a block move address: the V86 address space (first
+   1MB + 64K) is paged (private session memory), extended memory is not */
+static uint32_t move_phys(uint32_t a)
+{
+  if (a >= 0x110000)
+    return a;
+  return (lin_to_pte(a) & ~0xfffu) | (a & 0xfff);
+}
 
 /* INT 15h AH=87h: move extended memory block (used by XMS drivers) */
 static void int15_move(struct frame *f)
@@ -152,7 +166,18 @@ static void int15_move(struct frame *f)
     set_cf(f, 1);
     return;
   }
-  phys_copy(dst, src, len);
+  while (len)
+  {
+    uint32_t n = 4096 - (src & 0xfff);
+    if (n > 4096 - (dst & 0xfff))
+      n = 4096 - (dst & 0xfff);
+    if (n > len)
+      n = len;
+    phys_copy(move_phys(dst), move_phys(src), n);
+    src += n;
+    dst += n;
+    len -= n;
+  }
   AH(f) = 0;
   set_cf(f, 0);
   f->eflags |= EFL_ZF;
@@ -182,8 +207,14 @@ static int intercept(struct frame *f, uint8_t vec)
   }
   else if (vec == 0x21 && AH(f) == 0x4c)
     dpmi_rm_exit();             /* then terminate in DOS as usual */
+  else if (vec == 0x2a)
+    vm_crit(f);                 /* then reflect */
+  else if (vec == 0x28 || (vec == 0x2f && AX(f) == 0x1680))
+    vm_yield(f);                /* DOS idle: let other sessions run */
   else if (vec == 0x2f && AH(f) == 0xde)
   {
+    if (vm_api(f))
+      return 1;
     switch (AL(f))
     {
       case 0x00:                /* installation check */
@@ -211,7 +242,14 @@ static int kbc_output_port;      /* next 60h write is KBC output port data */
 
 static uint32_t io_in(uint16_t port, int size)
 {
-  uint32_t v = size == 1 ? inb(port) : size == 2 ? inw(port) : inl(port);
+  uint32_t v;
+  uint8_t b;
+
+  if (size == 1 && dma_port(port))
+    return dma_in(port);
+  if (port == 0x60 && size == 1 && vm_port60(&b))
+    return b;                   /* keystroke replayed by the session code */
+  v = size == 1 ? inb(port) : size == 2 ? inw(port) : inl(port);
 
   if (port == 0x92)
     v |= 0x02;                  /* A20 reported (and kept) on */
@@ -220,6 +258,11 @@ static uint32_t io_in(uint16_t port, int size)
 
 static void io_out(uint16_t port, int size, uint32_t v)
 {
+  if (size == 1 && dma_port(port))
+  {
+    dma_out(port, (uint8_t)v);
+    return;
+  }
   switch (port)
   {
     case 0x92:
@@ -294,7 +337,8 @@ static void v86_gp(struct frame *f)
     case 0xfb:                  /* STI */
       f->eip = (uint16_t)(ip + len);
       vm1.vif = 1;
-      deliver_pending(f);
+      v86_deliver(f);
+      vm_poll(f);
       return;
     case 0x9c:                  /* PUSHF(D) */
       f->eip = (uint16_t)(ip + len);
@@ -306,7 +350,8 @@ static void v86_gp(struct frame *f)
     case 0x9d:                  /* POPF(D) */
       f->eip = (uint16_t)(ip + len);
       vflags_set(f, o32 ? pop32(f) : v86_pop16(f), o32);
-      deliver_pending(f);
+      v86_deliver(f);
+      vm_poll(f);
       return;
     case 0xcf:                  /* IRET(D) */
       if (o32)
@@ -321,7 +366,8 @@ static void v86_gp(struct frame *f)
         f->cs = v86_pop16(f);
         vflags_set(f, v86_pop16(f), 0);
       }
-      deliver_pending(f);
+      v86_deliver(f);
+      vm_poll(f);
       return;
     case 0xcd:                  /* INT n */
     {
