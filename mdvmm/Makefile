@@ -16,8 +16,12 @@ CFLAGS  = -m32 -std=gnu11 -O2 -Wall -Wextra -Werror \
 NFLAGS  = -Iinclude/
 
 B       = build
-COBJS   = $(B)/entry.o $(B)/main.o $(B)/lib.o $(B)/mm.o $(B)/cpu.o $(B)/v86.o $(B)/dpmi.o $(B)/vm.o $(B)/dma.o \
-          $(B)/bios.o $(B)/fbcon.o $(B)/font.o $(B)/romimg.o
+# core objects; the UEFI core adds the virtual BIOS and native drivers,
+# the DOS core (MDVMM.COM, 64 KB limit) has stubs instead
+COBJS   = $(B)/entry.o $(B)/main.o $(B)/lib.o $(B)/mm.o $(B)/cpu.o $(B)/v86.o $(B)/dpmi.o \
+          $(B)/vm.o $(B)/dma.o
+UEFIOBJS = $(B)/bios.o $(B)/fbcon.o $(B)/font.o $(B)/romimg.o $(B)/pci.o $(B)/ahci.o
+DOSOBJS = $(B)/nobios.o
 HDRS    = core/core.h include/bootinfo.h
 
 CFLAGS64 = -m64 -std=gnu11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-builtin \
@@ -41,13 +45,18 @@ $(B)/romimg.o: core/romimg.asm $(B)/rom.bin
 $(B)/%.o: core/%.c $(HDRS) | $(B)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(B)/core.elf: $(COBJS) core/core.ld
-	$(LD) -m elf_i386 -z noexecstack --no-warn-rwx-segments -T core/core.ld -o $@ $(COBJS)
+LDCORE  = $(LD) -m elf_i386 -z noexecstack --no-warn-rwx-segments -T core/core.ld
 
-$(B)/core.bin: $(B)/core.elf
+$(B)/core.elf: $(COBJS) $(UEFIOBJS) core/core.ld
+	$(LDCORE) -o $@ $(COBJS) $(UEFIOBJS)
+
+$(B)/core_dos.elf: $(COBJS) $(DOSOBJS) core/core.ld
+	$(LDCORE) -o $@ $(COBJS) $(DOSOBJS)
+
+$(B)/%.bin: $(B)/%.elf
 	$(OBJCOPY) -O binary $< $@
 
-$(B)/MDVMM.COM: loader/loader.asm $(B)/core.bin include/bootinfo.inc
+$(B)/MDVMM.COM: loader/loader.asm $(B)/core_dos.bin include/bootinfo.inc
 	$(NASM) $(NFLAGS) -I$(B)/ -f bin -o $@ $<
 
 $(B)/uefi_main.o: uefi/main.c uefi/efi.h include/bootinfo.h | $(B)

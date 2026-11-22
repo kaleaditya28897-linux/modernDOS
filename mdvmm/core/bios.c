@@ -6,7 +6,8 @@
  *  - INT 10h: 80x25 text mode on a RAM screen, drawn on the GOP
  *    framebuffer by fbcon.c (and mirrored to COM1 when present)
  *  - INT 13h: the boot disk image the UEFI loader read from the ESP,
- *    as floppy drive 00h
+ *    as floppy drive 00h; hard disks 80h+ from native drivers (AHCI),
+ *    with the EDD extensions (41h-48h)
  *  - INT 16h / IRQ1: PS/2 keyboard, scancode set 1
  *  - INT 1Ah / IRQ0: PIT ticks, RTC
  *  - INT 15h: extended memory (E820h/E801h/88h) for an XMS driver: the
@@ -536,8 +537,8 @@ static void int16(struct frame *f)
     case 0x11:
       if (head == BDA16(0x1c))
       {
-        set_flag(f, EFL_ZF, 1);
-        vm_yield(f);                    /* polling: let others run */
+        set_flag(f, EFL_ZF, 1);         /* (no yield: DOS polls this on
+                                           every call for Ctrl+C) */
         break;
       }
       key = *(uint16_t *)(0x400 + head);
@@ -565,6 +566,189 @@ static void int16(struct frame *f)
 }
 
 /* ---------------------------------------------------------------- */
+/* INT 13h: hard disks 80h+ (native drivers: ahci.c)                */
+
+#define MAX_HD     8
+#define HD_HEADS   255
+#define HD_SPT     63
+#define STAGE_PAGES (DISK_MAX_SECTORS * 512 / 4096)
+
+static struct disk *hds[MAX_HD];
+static int nhd;
+static uint8_t hd_status;
+static uint32_t stage[STAGE_PAGES];     /* pool pages for transfers */
+
+void disk_register(struct disk *d)
+{
+  int i;
+
+  if (nhd == MAX_HD)
+    return;
+  if (!stage[0])
+    for (i = 0; i < STAGE_PAGES; i++)
+      if (!(stage[i] = page_alloc()))
+        panic("bios: out of memory");
+  hds[nhd] = d;
+  kprintf("bios: hard disk %02xh: %s\n", 0x80 + nhd, d->model);
+  nhd++;
+}
+
+static uint32_t hd_cyls(struct disk *d)
+{
+  uint32_t c;
+
+  if (d->sectors >= 1024ull * HD_HEADS * HD_SPT)
+    return 1024;
+  c = (uint32_t)d->sectors / (HD_HEADS * HD_SPT);
+  return c ? c : 1;
+}
+
+/* move n sectors between the disk and V86 memory at buf; *done = count */
+static int hd_transfer(struct disk *d, uint64_t lba, uint32_t n, uint8_t *buf, int write, uint32_t *done)
+{
+  int err = 0;
+
+  *done = 0;
+  while (n && !err)
+  {
+    uint32_t k = n > DISK_MAX_SECTORS ? DISK_MAX_SECTORS : n, i, bytes = k * 512;
+
+    if (write)
+      for (i = 0; i < bytes; i += 4096)
+        memcpy(pool_ptr(stage[i / 4096]), buf + i, bytes - i < 4096 ? bytes - i : 4096);
+    err = d->rw(d, lba, k, stage, write);
+    if (err)
+      break;
+    if (!write)
+      for (i = 0; i < bytes; i += 4096)
+        memcpy(buf + i, pool_ptr(stage[i / 4096]), bytes - i < 4096 ? bytes - i : 4096);
+    lba += k;
+    buf += bytes;
+    n -= k;
+    *done += k;
+  }
+  return err;
+}
+
+static void int13_hd(struct frame *f)
+{
+  int idx = DL(f) - 0x80, err = 0;
+  struct disk *d = idx < nhd ? hds[idx] : 0;
+  uint32_t done;
+
+  if (!d)
+  {
+    if (AH(f) == 0x15)
+    {
+      AH(f) = 0;                        /* no such drive */
+      set_flag(f, EFL_CF, 0);
+      return;
+    }
+    if (AH(f) == 0x08)
+      DL(f) = (uint8_t)nhd;
+    AH(f) = 0x01;
+    set_flag(f, EFL_CF, 1);
+    return;
+  }
+  switch (AH(f))
+  {
+    case 0x00: case 0x04: case 0x0c: case 0x0d: case 0x10:
+    case 0x11: case 0x14: case 0x44: case 0x47:
+      break;                            /* reset, verify, seek, ready */
+    case 0x01:
+      AH(f) = hd_status;
+      set_flag(f, EFL_CF, hd_status != 0);
+      return;
+    case 0x02:
+    case 0x03:
+    {
+      uint32_t cyl = CH(f) | (uint32_t)(CL(f) & 0xc0) << 2, sec = CL(f) & 0x3f;
+      if (!sec || sec > HD_SPT || !AL(f))
+      {
+        err = 0x04;
+        AL(f) = 0;
+        break;
+      }
+      err = hd_transfer(d, ((uint64_t)cyl * HD_HEADS + DH(f)) * HD_SPT + sec - 1, AL(f),
+                        rm_ptr(f->es, 0) + BX(f), AH(f) == 0x03, &done);
+      AL(f) = (uint8_t)done;
+      break;
+    }
+    case 0x08:
+    {
+      uint32_t c = hd_cyls(d) - 1;
+      AX(f) = 0;
+      BL(f) = 0;
+      CH(f) = c & 0xff;
+      CL(f) = (uint8_t)(HD_SPT | (c >> 2 & 0xc0));
+      DH(f) = HD_HEADS - 1;
+      DL(f) = (uint8_t)nhd;
+      break;
+    }
+    case 0x15:
+      CX(f) = (uint16_t)((d->sectors > 0xffffffffu ? 0xffffffffu : d->sectors) >> 16);
+      DX(f) = (uint16_t)(d->sectors > 0xffffffffu ? 0xffffffffu : d->sectors);
+      AH(f) = 0x03;                     /* fixed disk */
+      set_flag(f, EFL_CF, 0);
+      return;
+    case 0x41:
+      if (BX(f) != 0x55aa)
+      {
+        err = 0x01;
+        break;
+      }
+      BX(f) = 0xaa55;
+      CX(f) = 0x0001;                   /* extended disk access */
+      AH(f) = 0x21;                     /* EDD 1.1 */
+      set_flag(f, EFL_CF, 0);
+      return;
+    case 0x42:
+    case 0x43:
+    {
+      uint8_t *dap = rm_ptr(f->ds, SI(f));
+      uint16_t *count = (uint16_t *)(dap + 2);
+      uint16_t off = *(uint16_t *)(dap + 4), seg = *(uint16_t *)(dap + 6);
+      if (dap[0] < 0x10 || (seg == 0xffff && off == 0xffff))
+      {
+        err = 0x01;                     /* (no 64-bit flat buffers) */
+        break;
+      }
+      err = hd_transfer(d, *(uint64_t *)(dap + 8), *count, rm_ptr(seg, 0) + off,
+                        AH(f) == 0x43, &done);
+      *count = (uint16_t)done;
+      break;
+    }
+    case 0x48:
+    {
+      uint8_t *b = rm_ptr(f->ds, SI(f));
+      uint16_t size = *(uint16_t *)b;
+      if (size < 0x1a)
+      {
+        err = 0x01;
+        break;
+      }
+      size = size >= 0x1e ? 0x1e : 0x1a;
+      memset(b, 0, size);
+      *(uint16_t *)b = size;
+      *(uint16_t *)(b + 2) = 0x0002;    /* CHS information valid */
+      *(uint32_t *)(b + 4) = hd_cyls(d);
+      *(uint32_t *)(b + 8) = HD_HEADS;
+      *(uint32_t *)(b + 12) = HD_SPT;
+      *(uint64_t *)(b + 16) = d->sectors;
+      *(uint16_t *)(b + 24) = 512;
+      if (size == 0x1e)
+        *(uint32_t *)(b + 26) = 0xffffffffu;
+      break;
+    }
+    default:
+      err = 0x01;
+  }
+  hd_status = (uint8_t)err;
+  AH(f) = (uint8_t)err;
+  set_flag(f, EFL_CF, err != 0);
+}
+
+/* ---------------------------------------------------------------- */
 /* INT 13h: boot disk image as floppy drive 00h                     */
 
 static void int13(struct frame *f)
@@ -572,15 +756,15 @@ static void int13(struct frame *f)
   uint8_t drive = DL(f);
   int err = 0;
 
+  if (drive >= 0x80)
+  {
+    int13_hd(f);
+    return;
+  }
   if (drive != 0 || !rd)
   {
-    if (AH(f) == 0x15 && drive >= 0x80)
-      AH(f) = 0;                        /* no such drive */
-    else
-      AH(f) = 0x01;
-    set_flag(f, EFL_CF, AH(f) != 0);
-    if (AH(f) == 0x08)
-      DL(f) = 0;
+    AH(f) = 0x01;                       /* no such floppy drive */
+    set_flag(f, EFL_CF, 1);
     return;
   }
   switch (AH(f))
@@ -939,6 +1123,8 @@ void bios_init(void)
 
   serial_init();
   disk_init();
+  ahci_init();
+  BDA8(0x75) = (uint8_t)nhd;            /* number of hard disks */
   fbcon_init();
   active = 1;
 

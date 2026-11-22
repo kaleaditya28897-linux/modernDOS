@@ -13,7 +13,8 @@ and several DOS sessions.
 | M2.3 multiple DOS sessions | working: up to 4 preemptively scheduled DOS sessions, Ctrl+Alt+F1..F4 |
 | M3.1 UEFI boot | working: BOOTX64.EFI starts the core, which provides a virtual PC BIOS (GOP text console, PS/2 keyboard, timer, RTC, disk image from the ESP) and boots DOS |
 | M3.2 UEFI: XMS, sessions | working: extended memory for XMS drivers (DOS=HIGH), DPMI, DOS sessions on UEFI boots |
-| M3.3-M3.5 native drivers | planned: AHCI, NVMe, USB (xHCI) keyboard |
+| M3.3 AHCI | working: SATA disks on AHCI controllers are BIOS hard disks 80h+ (EDD), writes reach the disk |
+| M3.4-M3.5 native drivers | planned: NVMe, USB (xHCI) keyboard |
 
 ## Using it
 
@@ -54,6 +55,9 @@ mode (EMM386, JemmEx, another MDVMM).
   - `vm.c` - DOS sessions
   - `dma.c` - ISA DMA virtualization
   - `bios.c`, `rom.asm`, `fbcon.c`, `font.c` - virtual PC BIOS (UEFI boot)
+  - `pci.c`, `ahci.c` - PCI configuration space, AHCI disk driver
+  - `nobios.c` - stubs: the core in MDVMM.COM (64 KB .COM limit) is linked
+    without the virtual BIOS and the drivers; BOOTX64.EFI has the full core
 - `mdvmm/uefi/` - BOOTX64.EFI: x64 UEFI application with the core embedded.
 - The loader and the core share `struct bootinfo` (`mdvmm/include`).
 
@@ -175,8 +179,15 @@ The core then sets up a PC (`bios.c`):
   and the cursor on the framebuffer every timer tick, with the 8x16 font
   scaled up to 2x. Teletype output is mirrored to COM1 when a UART exists.
   Graphics modes and VESA are not provided yet.
-- INT 13h: the disk image as floppy drive 00h (geometry from its BPB).
-  Writes go to memory only.
+- INT 13h: the disk image as floppy drive 00h (geometry from its BPB);
+  writes go to memory only. Hard disks from native drivers are drives
+  80h and up (BIOS data area 40:75h): CHS functions with a 255/63
+  geometry, and the EDD extensions 41h, 42h, 43h, 48h. Transfers go
+  through 64 KB of pool pages; drivers implement `struct disk`.
+- AHCI (`ahci.c`): every AHCI controller on PCI (class 01:06:01), every
+  port with a SATA disk. Port takeover, IDENTIFY, READ/WRITE DMA (EXT),
+  one command at a time, polled with interrupts off (the machine stops
+  during a transfer, as with a PIO BIOS). Registers must be below 4 GB.
 - INT 16h / IRQ1: PS/2 keyboard (scancode set 1), BIOS keyboard buffer,
   INT 15h AH=4Fh hook, Ctrl+Alt+Del reboots.
 - Extended memory: DOS sees the loader's region at 1 MB, through INT 15h
@@ -196,8 +207,8 @@ BIOS does, and loads the kernel.
   VCPI) stop the machine with a monitor panic. VCPI is not planned.
 - Reprogramming the PIC vector base from DOS is not virtualized.
 - A20 is always enabled (programs relying on 1 MB wraparound need LOADFIX).
-- UEFI boot: the disk is a RAM copy of the image (writes are lost);
-  PS/2 keyboard only; text mode only; the framebuffer must be below 4 GB
+- UEFI boot: the boot floppy is a RAM copy of the image (writes are
+  lost; hard disks are real); no NVMe yet; PS/2 keyboard only; text mode only; the framebuffer must be below 4 GB
   and 32 bpp RGB/BGR; no ISA DMA (no bounce buffer below 16 MB).
 - Sessions: no switching while a DPMI client runs; a DPMI client doing
   its own DMA in a session other than 0 gets wrong addresses; graphics
@@ -219,7 +230,9 @@ options can be passed in `QEMU_EXTRA`, for example `-d int,cpu_reset -D qemu.log
 
 `tests/uefi/run.sh` boots OVMF from a FAT ESP holding BOOTX64.EFI and the
 DOS image (HIMEMX, `DOS=HIGH`), runs the MDVMM test programs (V86CHK,
-XMSTEST, LFNTEST, DJTEST, DPMITEST, a second session with SESSTEST),
-then types a command at the FreeCOM prompt through QEMU `sendkey` and
+XMSTEST, LFNTEST, DJTEST, DPMITEST, a second session with SESSTEST) and
+DISKTEST on a 64 MB AHCI disk (MBR, FAT16) as C:. After QEMU exits the
+disk is checked from Linux: fsck, a 1 MB pattern file, FROMDOS.TXT. It
+also types a command at the FreeCOM prompt through QEMU `sendkey` and
 checks the echo in the COM1 mirror of the screen. `SCREEN=file.ppm` saves
 the framebuffer.

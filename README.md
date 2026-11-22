@@ -11,7 +11,7 @@ INT 21h, INT 2Fh, program loading (EXEC) and the DOS version numbers reported by
 |---|---|---|
 | M1 | Kernel modernization: reproducible container build, QEMU boot tests, native long-filename (LFN) API in the kernel (`docs/lfnapi.txt`) | done |
 | M2 | MDVMM supervisor: 32-bit V86 monitor + DPMI host, multiple DOS sessions (`docs/mdvmm.md`) | done |
-| M3 | UEFI boot with native drivers (GOP display, AHCI/NVMe disks, USB input) | in progress: DOS boots on UEFI with a virtual BIOS, XMS, DPMI and sessions (M3.1-M3.2) |
+| M3 | UEFI boot with native drivers (GOP display, AHCI/NVMe disks, USB input) | in progress: DOS boots on UEFI with a virtual BIOS, XMS, DPMI, sessions and AHCI disks (M3.1-M3.3) |
 | M4 | Original desktop GUI + widget toolkit (32-bit DPMI) | planned |
 | M5 | Native apps: file manager, editor, settings, terminal (DOS session in a window) | planned |
 | M6 | Networking: TCP/IP, sockets API, package manager, browser | planned |

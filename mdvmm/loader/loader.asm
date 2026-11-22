@@ -521,6 +521,6 @@ transient_end:                          ; MDVMM NEW keeps memory up to here
 
         align   16
 core_image:
-        incbin  "core.bin"
+        incbin  "core_dos.bin"
         align   2, db 0
 core_end:

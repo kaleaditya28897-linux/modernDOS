@@ -14,6 +14,7 @@
  *   E0000000-E0FFFFFF  DPMI host code page and stacks (HOST_AREA)
  *   E1000000-E7FFFFFF  UEFI framebuffer (FB_VIRT)
  *   E8000000-EBFFFFFF  UEFI boot disk image (RD_VIRT)
+ *   EC000000-EDFFFFFF  device registers (MMIO_VIRT, pci.c)
  *   EE000000-EE3FFFFF  DOS session instance data (vm.c INST_BASE)
  *   EFC00000-EFFFFFFF  temporary physical windows (mm.c KMAP_BASE)
  *   F0000000-          the core and its pool (KBASE)
@@ -24,6 +25,8 @@
 #define FB_MAX    0x07000000u
 #define RD_VIRT   0xE8000000u
 #define RD_MAX    0x04000000u
+#define MMIO_VIRT 0xEC000000u
+#define MMIO_MAX  0x02000000u
 #define KCODE     0x08
 #define KDATA     0x10
 #define TSS_SEL   0x18
@@ -164,6 +167,28 @@ void fbcon_init(void);
 void fbcon_update(void);
 void serial_putc(uint8_t c);
 uint32_t ext_phys(uint32_t a);
+
+/* pci.c */
+uint32_t pci_read32(int bus, int dev, int fn, int reg);
+void pci_write32(int bus, int dev, int fn, int reg, uint32_t v);
+void pci_scan(uint32_t cls, void (*found)(int bus, int dev, int fn));
+void pci_enable(int bus, int dev, int fn);
+void *mmio_map(uint32_t phys, uint32_t size);
+void udelay(uint32_t us);
+
+/* hard disks for the virtual BIOS (INT 13h drives 80h+), from native
+   drivers. rw() moves up to DISK_MAX_SECTORS 512-byte sectors between
+   the disk and the pages in pages[] (4K each); 0 on success, else an
+   INT 13h error code. */
+#define DISK_MAX_SECTORS 128
+struct disk {
+  uint64_t sectors;
+  char model[41];
+  void *drv;
+  int (*rw)(struct disk *d, uint64_t lba, uint32_t n, const uint32_t *pages, int write);
+};
+void disk_register(struct disk *d);
+void ahci_init(void);
 
 /* dma.c */
 void dma_init(void);
