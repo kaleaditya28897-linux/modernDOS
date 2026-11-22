@@ -66,3 +66,4 @@ test/result.txt
 
 # MDVMM build output
 mdvmm/build/
+gui/build/

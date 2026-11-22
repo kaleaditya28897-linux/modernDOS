@@ -12,6 +12,8 @@
 
 %include "bootinfo.inc"
 
+VBE_MODE        equ 141h                ; the framebuffer's mode (bios.c)
+
         cpu     386
         bits    16
         org     0
@@ -24,6 +26,7 @@ table:
         dw      int18, int19, int1a, irq0_bp, irq1_bp, int16_wait
         dw      dpt, config_table, stub_bp, stub_entry, stub_psp, stub_retf
         dw      irq0, irq1, irq_master, irq_slave, dummy_iret
+        dw      vbe_oem, vbe_vendor, vbe_product, vbe_rev, vbe_modes
 table_end:
 
 ; ---- BIOS services: HLT (to the monitor), then RETF 2 ----
@@ -130,6 +133,14 @@ config_table:
         db      0                       ; revision
         db      01110000b               ; 2nd PIC, RTC, INT 15h/4Fh hook
         db      0, 0, 0, 0
+
+; VBE controller information (INT 10h AX=4F00h)
+vbe_oem     db  'modernDOS MDVMM GOP', 0
+vbe_vendor  db  'modernDOS', 0
+vbe_product db  'UEFI framebuffer', 0
+vbe_rev     db  '1.0', 0
+        align   2
+vbe_modes   dw  VBE_MODE, 0ffffh
 
 ; (the reset vector, BIOS date and model byte at F000:FFF0 are written
 ; by bios_init: this image is kept small, it is part of MDVMM.COM)

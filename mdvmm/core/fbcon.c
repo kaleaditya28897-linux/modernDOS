@@ -17,6 +17,7 @@ static uint32_t pitch, scale, x0, y0;
 static uint32_t palette[16];
 static uint16_t shadow[COLS * ROWS];
 static int cur_cell = -1, blink;
+static int suspended;                   /* a program owns the framebuffer */
 static uint32_t ticks;
 
 static const uint8_t cga[16][3] = {
@@ -62,6 +63,31 @@ void fbcon_init(void)
           boot.fb_height, boot.fb_phys, scale);
 }
 
+/* clear the whole framebuffer */
+void fbcon_clear(void)
+{
+  uint32_t i;
+
+  if (fb)
+    for (i = 0; i < pitch * boot.fb_height; i++)
+      fb[i] = 0;
+}
+
+/* a VBE graphics mode starts (on) or ends: stop or resume drawing text */
+void fbcon_graphics(int on)
+{
+  int i;
+
+  suspended = on;
+  if (!on)
+  {
+    fbcon_clear();
+    for (i = 0; i < COLS * ROWS; i++)
+      shadow[i] = 0xffff;               /* redraw everything */
+    cur_cell = -1;
+  }
+}
+
 static void draw_cell(int n, uint16_t v, int cursor)
 {
   const uint8_t *glyph = font8x16 + (v & 0xff) * 16;
@@ -101,7 +127,7 @@ void fbcon_update(void)
   int n, c;
   uint8_t active;
 
-  if (!fb)
+  if (!fb || suspended)
     return;
   active = *(uint8_t *)rm_ptr(0x40, 0x62) & 7;
   page = pool_ptr(vram_phys[active]);   /* 4K per text page */

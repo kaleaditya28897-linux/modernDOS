@@ -1,7 +1,7 @@
 /* 8x16 code page 437 console font, 256 glyphs x 16 rows.
  * From the Linux kernel, lib/fonts/font_8x16.c (SPDX: GPL-2.0),
  * generated there by cpi2fnt. */
-#include "core.h"
+#include <stdint.h>
 
 const uint8_t font8x16[4096] = {
   0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  /* 00 */

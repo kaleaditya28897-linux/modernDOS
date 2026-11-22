@@ -26,6 +26,7 @@ TEST="$ROOT/test"
 
 echo "== building MDVMM and test programs"
 make -s -C "$ROOT/mdvmm"
+make -s -C "$ROOT/gui"
 for p in v86chk poweroff xmstest; do
   "$NASM" -f bin -o "$WORK/$p.com" "$HERE/$p.asm"
 done
@@ -34,6 +35,7 @@ ia16-elf-gcc -mcmodel=small -Os -o "$WORK/sesstest.exe" "$HERE/sesstest.c" -li86
 DJGPP=/opt/djgpp/bin/i586-pc-msdosdjgpp-gcc
 "$DJGPP" -O2 -o "$WORK/djtest.exe" "$ROOT/tests/lfn/djtest.c"
 "$DJGPP" -O2 -o "$WORK/dpmitest.exe" "$HERE/dpmitest.c"
+"$DJGPP" -O2 -I"$ROOT/gui/lib" -o "$WORK/gfxtest.exe" "$ROOT/tests/gui/gfxtest.c" "$ROOT/gui/build/mdgui.o"
 
 echo "== building boot floppy"
 cd "$WORK"
@@ -57,6 +59,8 @@ IF ERRORLEVEL 1 GOTO END
 A:\MDVMM.COM NEW A:\BG.BAT
 IF ERRORLEVEL 1 GOTO END
 A:\SESSTEST.EXE /FG
+IF ERRORLEVEL 1 GOTO END
+A:\GFXTEST.EXE
 IF ERRORLEVEL 1 GOTO END
 ECHO success>A:\RESULT.TXT
 :END
@@ -87,6 +91,7 @@ mcopy -i disk.img lfntest.exe ::LFNTEST.EXE
 mcopy -i disk.img djtest.exe ::DJTEST.EXE        # note: no CWSDPMI on this disk
 mcopy -i disk.img dpmitest.exe ::DPMITEST.EXE
 mcopy -i disk.img sesstest.exe ::SESSTEST.EXE
+mcopy -i disk.img gfxtest.exe ::GFXTEST.EXE
 mcopy -i disk.img bg.bat ::BG.BAT
 printf 'hello from linux\n' > linux.txt
 mcopy -i disk.img linux.txt "::Created On Linux.txt"
@@ -121,10 +126,13 @@ while time.time() < deadline:
     time.sleep(1.5)
 PY
 keys_pid=$!
+python3 "$ROOT/tests/gui/gfxshot.py" debug.log mon.sock gfx.ppm &
+shot_gfx=$!
 timeout --foreground 180 "$QEMU" -m 64 \
   -drive file=disk.img,format=raw,if=floppy -display none \
   -debugcon file:debug.log -no-reboot \
   -monitor unix:mon.sock,server,nowait $QEMU_EXTRA </dev/null || true
+kill $shot_gfx 2>/dev/null || true
 kill $keys_pid 2>/dev/null || true
 sed 's/\r$//' debug.log
 
@@ -136,7 +144,7 @@ for marker in "MDVMM core:" "v86: entering VM1" "v86chk: protected mode bit set"
               "xmstest: 4K round trip" "RESULT: PASSED" "dpmi: 32 bit client" \
               "DJGPP: 0 failures" "DPMI: 0 failures" "vm: sessions enabled" \
               "vm: session 1 started" "vm: focus session 1" "vm: session 1 ended" \
-              "SESSIONS: 0 failures"; do
+              "SESSIONS: 0 failures" "GFXTEST: text mode again"; do
   if grep -q "$marker" debug.log; then echo "  ok   log: $marker"; else
     echo "  FAIL log missing: $marker"; fail=1; fi
 done
@@ -144,5 +152,7 @@ if grep -q "MDVMM PANIC" debug.log; then echo "  FAIL monitor panic"; fail=1; fi
 if fsck.fat -n disk.img >/dev/null; then echo "  ok   file system clean"; else
   echo "  FAIL fsck.fat"; fail=1; fi
 
+python3 "$ROOT/tests/gui/gfxcheck.py" gfx.ppm debug.log || fail=1
+[ -n "$GFXSHOT" ] && cp gfx.ppm "$GFXSHOT" 2>/dev/null || true
 if [ $fail = 0 ]; then echo "MDVMM TEST: success"; else echo "MDVMM TEST: failure"; fi
 exit $fail

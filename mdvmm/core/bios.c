@@ -4,7 +4,8 @@
  * through one. The monitor provides it: rom.asm is mapped at F000:0000
  * and its interrupt vectors are HLT breakpoints that land here.
  *  - INT 10h: 80x25 text mode on a RAM screen, drawn on the GOP
- *    framebuffer by fbcon.c (and mirrored to COM1 when present)
+ *    framebuffer by fbcon.c (and mirrored to COM1 when present); VBE 3.0
+ *    with one linear framebuffer mode, the GOP mode itself
  *  - INT 13h: the boot disk image the UEFI loader read from the ESP,
  *    as floppy drive 00h; hard disks 80h+ from native drivers (AHCI, NVMe),
  *    with the EDD extensions (41h-48h)
@@ -26,6 +27,7 @@ enum rom_id {
   R_INT18, R_INT19, R_INT1A, R_IRQ0_BP, R_IRQ1_BP, R_INT16_WAIT,
   R_DPT, R_CONFIG, R_STUB_BP, R_STUB_ENTRY, R_STUB_PSP, R_STUB_RETF,
   R_IRQ0, R_IRQ1, R_IRQ_MASTER, R_IRQ_SLAVE, R_IRET,
+  R_VBE_OEM, R_VBE_VENDOR, R_VBE_PRODUCT, R_VBE_REV, R_VBE_MODES,
   R_COUNT
 };
 
@@ -228,6 +230,133 @@ static void set_mode(uint8_t mode)
       ((uint16_t *)0xb8000)[i] = 0x0720;
 }
 
+/* ---------------------------------------------------------------- */
+/* INT 10h AH=4Fh: VBE 3.0 with one mode, the GOP framebuffer       */
+
+#define VBE_MODE  0x141                 /* rom.asm */
+
+static int gfx_mode;                    /* the framebuffer belongs to a program */
+
+static void vbe_info(struct frame *f)
+{
+  uint8_t *b = rm_ptr(f->es, DI(f));
+  int vbe2 = memcmp(b, "VBE2", 4) == 0;
+
+  memset(b, 0, vbe2 ? 512 : 256);
+  memcpy(b, "VESA", 4);
+  *(uint16_t *)(b + 4) = 0x0300;
+  *(uint32_t *)(b + 6) = (uint32_t)ROM_SEG << 16 | rom[R_VBE_OEM];
+  *(uint32_t *)(b + 10) = 0;            /* capabilities: fixed DAC, VGA compatible */
+  *(uint32_t *)(b + 14) = (uint32_t)ROM_SEG << 16 | rom[R_VBE_MODES];
+  *(uint16_t *)(b + 18) = (uint16_t)(boot.fb_size >> 16);
+  if (vbe2)
+  {
+    *(uint16_t *)(b + 20) = 0x0100;
+    *(uint32_t *)(b + 22) = (uint32_t)ROM_SEG << 16 | rom[R_VBE_VENDOR];
+    *(uint32_t *)(b + 26) = (uint32_t)ROM_SEG << 16 | rom[R_VBE_PRODUCT];
+    *(uint32_t *)(b + 30) = (uint32_t)ROM_SEG << 16 | rom[R_VBE_REV];
+  }
+}
+
+static void vbe_mode_info(struct frame *f)
+{
+  uint8_t *b = rm_ptr(f->es, DI(f));
+  uint32_t pitch = boot.fb_pitch * 4;
+  int rgb = boot.fb_format == FB_RGBX;
+
+  memset(b, 0, 256);
+  *(uint16_t *)b = 0xfb;                /* supported, color, graphics, LFB only */
+  *(uint16_t *)(b + 0x10) = (uint16_t)pitch;
+  *(uint16_t *)(b + 0x12) = (uint16_t)boot.fb_width;
+  *(uint16_t *)(b + 0x14) = (uint16_t)boot.fb_height;
+  b[0x16] = 8;
+  b[0x17] = 16;
+  b[0x18] = 1;                          /* planes */
+  b[0x19] = 32;                         /* bits per pixel */
+  b[0x1a] = 1;                          /* banks */
+  b[0x1b] = 6;                          /* direct color */
+  b[0x1e] = 1;
+  b[0x1f] = 8; b[0x20] = rgb ? 0 : 16;  /* red */
+  b[0x21] = 8; b[0x22] = 8;             /* green */
+  b[0x23] = 8; b[0x24] = rgb ? 16 : 0;  /* blue */
+  b[0x25] = 8; b[0x26] = 24;            /* reserved */
+  *(uint32_t *)(b + 0x28) = boot.fb_phys;
+  *(uint16_t *)(b + 0x32) = (uint16_t)pitch;
+  b[0x36] = 8; b[0x37] = rgb ? 0 : 16;
+  b[0x38] = 8; b[0x39] = 8;
+  b[0x3a] = 8; b[0x3b] = rgb ? 16 : 0;
+  b[0x3c] = 8; b[0x3d] = 24;
+}
+
+static void graphics(int on)
+{
+  if (on == gfx_mode)
+    return;
+  gfx_mode = on;
+  fbcon_graphics(on);
+}
+
+static void vbe(struct frame *f)
+{
+  uint16_t mode;
+  uint8_t fn = AL(f);
+
+  AX(f) = 0x014f;                       /* failed */
+  if (!boot.fb_phys)
+    return;
+  switch (fn)
+  {
+    case 0x00:
+      vbe_info(f);
+      break;
+    case 0x01:
+      if ((CX(f) & 0x1ff) != VBE_MODE)
+        return;
+      vbe_mode_info(f);
+      break;
+    case 0x02:
+      mode = BX(f) & 0x1ff;
+      if (mode == VBE_MODE)
+      {
+        graphics(1);
+        if (!(BX(f) & 0x8000))
+          fbcon_clear();
+      }
+      else if (mode == 0x03 || mode == 0x02)
+      {
+        set_mode((uint8_t)(mode | (BX(f) & 0x8000 ? 0x80 : 0)));
+        graphics(0);
+      }
+      else
+        return;
+      break;
+    case 0x03:
+      BX(f) = gfx_mode ? VBE_MODE | 0x4000 : BDA8(0x49);
+      break;
+    case 0x06:                          /* scan line length: get only */
+      if (BL(f) != 1)
+        return;
+      BX(f) = (uint16_t)(boot.fb_pitch * 4);
+      CX(f) = (uint16_t)boot.fb_pitch;
+      DX(f) = (uint16_t)boot.fb_height;
+      break;
+    case 0x07:                          /* display start: 0,0 only */
+      if (BL(f) == 1)
+        CX(f) = DX(f) = 0;
+      else if (BL(f) == 0 || BL(f) == 0x80)
+      {
+        if (CX(f) || DX(f))
+          return;
+      }
+      else
+        return;
+      break;
+    default:
+      return;
+  }
+  AX(f) = 0x004f;
+}
+
 static void int10(struct frame *f)
 {
   int page = BH(f) & 7, row, col, i;
@@ -236,6 +365,7 @@ static void int10(struct frame *f)
   {
     case 0x00:
       set_mode(AL(f));
+      graphics(0);                      /* text mode only */
       AL(f) = 0x30;
       break;
     case 0x01:
@@ -320,8 +450,8 @@ static void int10(struct frame *f)
         BX(f) = 0x0008;                 /* VGA, color */
       }
       break;
-    case 0x4f:                          /* VESA BIOS extensions: none */
-      AX(f) = 0x0100;
+    case 0x4f:
+      vbe(f);
       break;
   }
 }
@@ -611,6 +741,8 @@ static int hd_transfer(struct disk *d, uint64_t lba, uint32_t n, uint8_t *buf, i
   int err = 0;
 
   *done = 0;
+  if (write && !(boot.flags & BOOTF_DISK_WRITE))
+    return 0x03;                        /* write protected */
   while (n && !err)
   {
     uint32_t k = n > DISK_MAX_SECTORS ? DISK_MAX_SECTORS : n, i, bytes = k * 512;
@@ -1136,6 +1268,9 @@ void bios_init(void)
   nvme_init();
   xhci_init();
   BDA8(0x75) = (uint8_t)nhd;            /* number of hard disks */
+  if (nhd)
+    kprintf("bios: hard disks are %s\n", boot.flags & BOOTF_DISK_WRITE ? "writable" :
+            "read-only (no \\MODERNDOS\\DISKRW on the boot volume)");
   fbcon_init();
   active = 1;
 

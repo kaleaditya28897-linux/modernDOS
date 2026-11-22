@@ -168,6 +168,8 @@ void bios_init(void);
 int bios_bp(struct frame *f, uint16_t ip);
 void fbcon_init(void);
 void fbcon_update(void);
+void fbcon_graphics(int on);
+void fbcon_clear(void);
 void serial_putc(uint8_t c);
 uint32_t ext_phys(uint32_t a);
 
