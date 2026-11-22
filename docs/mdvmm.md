@@ -15,7 +15,7 @@ and several DOS sessions.
 | M3.2 UEFI: XMS, sessions | working: extended memory for XMS drivers (DOS=HIGH), DPMI, DOS sessions on UEFI boots |
 | M3.3 AHCI | working: SATA disks on AHCI controllers are BIOS hard disks 80h+ (EDD), writes reach the disk |
 | M3.4 NVMe | working: NVMe namespaces (512-byte blocks) are BIOS hard disks too; registers above 4 GB via PSE-36 |
-| M3.5 USB keyboard | planned: xHCI, HID boot protocol |
+| M3.5 USB keyboard | working: keyboards on xHCI root ports (HID boot protocol) arrive as PS/2 scancodes, with typematic repeat |
 
 ## Using it
 
@@ -58,6 +58,7 @@ mode (EMM386, JemmEx, another MDVMM).
   - `bios.c`, `rom.asm`, `fbcon.c`, `font.c` - virtual PC BIOS (UEFI boot)
   - `pci.c`, `ahci.c`, `nvme.c` - PCI configuration space, device register
     mappings, AHCI and NVMe disk drivers
+  - `xhci.c`, `usbkbd.c` - xHCI host controller, USB keyboards
   - `nobios.c` - stubs: the core in MDVMM.COM (64 KB .COM limit) is linked
     without the virtual BIOS and the drivers; BOOTX64.EFI has the full core
 - `mdvmm/uefi/` - BOOTX64.EFI: x64 UEFI application with the core embedded.
@@ -202,6 +203,16 @@ The core then sets up a PC (`bios.c`):
   core keeps 32-bit paging.
 - INT 16h / IRQ1: PS/2 keyboard (scancode set 1), BIOS keyboard buffer,
   INT 15h AH=4Fh hook, Ctrl+Alt+Del reboots.
+- USB keyboards (`xhci.c`, `usbkbd.c`), like a BIOS's legacy USB
+  support: each xHCI controller (class 0C:03:30) is taken from the
+  firmware (legacy support handoff) and reset; devices on root ports are
+  addressed and the first HID boot keyboard interface gets eight queued
+  interrupt transfers. The event ring is polled on every timer tick and
+  INT 16h call. Report changes become scancode set 1 make/break codes,
+  which reach the focused session as a virtual IRQ1 with the byte at
+  port 60h (`vm_key`), so INT 09h hooks see them as PS/2 keys and the
+  session hotkeys work. The last key held repeats after 500 ms, about
+  9 per second. Not yet: hubs, hotplug, keyboard LEDs.
 - Extended memory: DOS sees the loader's region at 1 MB, through INT 15h
   E820h, E801h and 88h, so any XMS driver works (HIMEMX, `DOS=HIGH`).
   The HMA (linear 100000h-10FFFFh) is mapped to its first 64 KB. INT 15h
@@ -220,7 +231,8 @@ BIOS does, and loads the kernel.
 - Reprogramming the PIC vector base from DOS is not virtualized.
 - A20 is always enabled (programs relying on 1 MB wraparound need LOADFIX).
 - UEFI boot: the boot floppy is a RAM copy of the image (writes are
-  lost; hard disks are real); PS/2 keyboard only; text mode only; the framebuffer must be below 4 GB
+  lost; hard disks are real); USB keyboards only on root ports (no
+  hubs, no hotplug), no USB mice; text mode only; the framebuffer must be below 4 GB
   and 32 bpp RGB/BGR; no ISA DMA (no bounce buffer below 16 MB).
 - Sessions: no switching while a DPMI client runs; a DPMI client doing
   its own DMA in a session other than 0 gets wrong addresses; graphics
@@ -247,5 +259,6 @@ DISKTEST on a 64 MB AHCI disk as C: and a 96 MB NVMe disk as D: (MBR,
 FAT16; OVMF puts the NVMe registers above 4 GB). After QEMU exits both
 disks are checked from Linux: fsck, a 1 MB pattern file, FROMDOS.TXT. It
 also types a command at the FreeCOM prompt through QEMU `sendkey` and
-checks the echo in the COM1 mirror of the screen. `SCREEN=file.ppm` saves
-the framebuffer.
+checks the echo in the COM1 mirror of the screen; a key held for 1.5 s
+must repeat. All keys go to a USB keyboard on an xHCI controller.
+`SCREEN=file.ppm` saves the framebuffer.

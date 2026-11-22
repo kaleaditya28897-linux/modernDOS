@@ -235,8 +235,7 @@ void vm_poll(struct frame *f)
 {
   if (want >= 0 && want != cur && ses[want].used && switchable(0))
     switch_to(f, want, 1);
-  if (nsessions > 1)
-    kbd_inject(f);
+  kbd_inject(f);
 }
 
 /* timer interrupt (IRQ0 pending, not yet delivered) */
@@ -339,6 +338,39 @@ int vm_kbd(struct frame *f)
     return 1;
   }
   return 0;
+}
+
+/* a keystroke from a keyboard other than the PS/2 controller (USB):
+   hotkeys as on IRQ1, otherwise queued for the focused session, which
+   gets it as a virtual IRQ1 with the scancode at port 60h */
+void vm_key(uint8_t sc)
+{
+  struct session *s = &ses[focus];
+  int next = (s->kq_tail + 1) % KQ_SIZE;
+
+  switch (sc & 0x7f)
+  {
+    case 0x1d: kbd_ctrl = !(sc & 0x80); break;
+    case 0x38: kbd_alt = !(sc & 0x80); break;
+  }
+  if (registered && kbd_ctrl && kbd_alt && sc >= 0x3b && sc <= 0x3e)
+  {
+    set_focus(sc - 0x3b);
+    return;
+  }
+  if (next != s->kq_head)
+  {
+    s->kq[s->kq_tail] = sc;
+    s->kq_tail = next;
+  }
+  if (focus != cur && nsessions > 1)
+    want = focus;
+}
+
+/* scancodes waiting for the running session */
+int vm_key_pending(void)
+{
+  return ses[cur].kq_head != ses[cur].kq_tail;
 }
 
 /* port 60h read by a session: replay the latched scancode once */

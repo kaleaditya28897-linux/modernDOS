@@ -8,7 +8,8 @@
  *  - INT 13h: the boot disk image the UEFI loader read from the ESP,
  *    as floppy drive 00h; hard disks 80h+ from native drivers (AHCI, NVMe),
  *    with the EDD extensions (41h-48h)
- *  - INT 16h / IRQ1: PS/2 keyboard, scancode set 1
+ *  - INT 16h / IRQ1: PS/2 keyboard, scancode set 1; USB keyboards on
+ *    xHCI controllers (xhci.c, usbkbd.c) arrive as PS/2 scancodes
  *  - INT 1Ah / IRQ0: PIT ticks, RTC
  *  - INT 15h: extended memory (E820h/E801h/88h) for an XMS driver: the
  *    loader's region, seen by DOS at 1MB (HMA first); see ext_phys()
@@ -515,6 +516,7 @@ static void int16(struct frame *f)
   uint16_t head = BDA16(0x1a), key;
   int ext = AH(f) & 0x10;
 
+  xhci_poll();                          /* a key may be waiting */
   switch (AH(f))
   {
     case 0x00:
@@ -995,6 +997,8 @@ int bios_bp(struct frame *f, uint16_t ip)
       BDA32(0x6c) = 0;
       BDA8(0x70) = 1;
     }
+    xhci_poll();                        /* USB keyboards */
+    usbkbd_tick();
     fbcon_update();
     f->eip++;
     return 1;
@@ -1130,6 +1134,7 @@ void bios_init(void)
   disk_init();
   ahci_init();
   nvme_init();
+  xhci_init();
   BDA8(0x75) = (uint8_t)nhd;            /* number of hard disks */
   fbcon_init();
   active = 1;

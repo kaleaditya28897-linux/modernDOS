@@ -19,7 +19,9 @@
 # Afterwards both disk images are checked from Linux: fsck, the 1 MB
 # file DISKTEST wrote, FROMDOS.TXT.
 # and leaves FreeCOM at its prompt, where the harness types (QEMU sendkey)
-#   ECHO Typed: aB3!~   and then   A:\POWEROFF
+#   ECHO Typed: aB3!~   ECHO R + x held for 1.5 s (repeat)   A:\POWEROFF
+# All keys (also the session hotkeys) go to a USB keyboard on an xHCI
+# controller: QEMU sends input to the last keyboard that was activated.
 # The console is mirrored to COM1 (serial.log); MDVMM and the tests log
 # to the QEMU debug console. With SCREEN=file.ppm the GOP screen is saved
 # at the end.
@@ -197,9 +199,14 @@ while time.time() < deadline and b"UEFI BOOT: success" not in text(serial):
 time.sleep(2)
 try:
     s = socket.socket(socket.AF_UNIX); s.connect(sock)
-    for c in "ECHO Typed: aB3!~\nA:\\POWEROFF\n":
-        s.sendall(("sendkey %s\n" % key(c)).encode())
-        time.sleep(0.15)
+    def type_text(t):
+        for c in t:
+            s.sendall(("sendkey %s\n" % key(c)).encode())
+            time.sleep(0.15)
+    type_text("ECHO Typed: aB3!~\nECHO R")
+    s.sendall(b"sendkey x 1500\n")    # held: typematic repeat
+    time.sleep(2)
+    type_text("\nA:\\POWEROFF\n")
     time.sleep(1); s.close()
 except OSError:
     pass
@@ -211,6 +218,7 @@ timeout --foreground 180 qemu-system-x86_64 -m 256 -bios "$OVMF" \
   -device ide-hd,drive=hd,bus=ahci.0 \
   -drive id=nv,file=nvme.img,format=raw,if=none \
   -device nvme,serial=MDNVME01,drive=nv \
+  -device qemu-xhci,id=xhci -device usb-kbd,bus=xhci.0 \
   -debugcon file:debug.log -serial file:serial.log -no-reboot \
   -monitor unix:mon.sock,server,nowait $QEMU_EXTRA </dev/null || true
 kill $keys_pid 2>/dev/null || true
@@ -228,12 +236,13 @@ for marker in "MDVMM core:" "bios: disk image" "fbcon:" "v86: entering VM1" \
               "DJGPP: 0 failures" "DPMI: 0 failures" "vm: session 1 ended" \
               "SESSIONS: 0 failures" "ahci: port 0: QEMU HARDDISK" \
               "nvme: namespace 1: 96 MB" "DISKTEST: 0 failures" \
-              "disk test on D:"; do
+              "disk test on D:" "xhci: port [0-9]*: keyboard" \
+              "usbkbd: first key report"; do
   if grep -q "$marker" debug.log; then echo "  ok   log: $marker"; else
     echo "  FAIL log missing: $marker"; fail=1; fi
 done
 for marker in "modernDOS kernel" "Hello from DOS on UEFI" "UEFI BOOT: success" \
-              "^Typed: aB3!~"; do
+              "^Typed: aB3!~$" "^Rxxxxx"; do
   if sed 's/\r//g' serial.log | grep -aq "$marker"; then echo "  ok   screen: $marker"; else
     echo "  FAIL screen missing: $marker"; fail=1; fi
 done

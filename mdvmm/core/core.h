@@ -157,6 +157,8 @@ void vm_poll(struct frame *f);
 void vm_yield(struct frame *f);
 int vm_kbd(struct frame *f);
 int vm_port60(uint8_t *v);
+void vm_key(uint8_t sc);
+int vm_key_pending(void);
 int vm_api(struct frame *f);
 void vm_crit(struct frame *f);
 
@@ -194,6 +196,12 @@ struct disk {
 void disk_register(struct disk *d);
 void ahci_init(void);
 void nvme_init(void);
+
+/* xhci.c, usbkbd.c: USB keyboards */
+void xhci_init(void);
+void xhci_poll(void);
+void usbkbd_report(const uint8_t *report);
+void usbkbd_tick(void);
 
 /* dma.c */
 void dma_init(void);

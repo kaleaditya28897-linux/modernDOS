@@ -134,6 +134,11 @@ void v86_irq(struct frame *f, int irq)
 /* emulate HLT: wait for an interrupt the VM will accept */
 static void halt(struct frame *f)
 {
+  if (vm1.vif && vm_key_pending())
+  {
+    vm_poll(f);                 /* a queued keystroke wakes it up */
+    return;
+  }
   vm_yield(f);                  /* another session may run instead */
   while (!(vm1.vif && vm1.pending))
     __asm__ volatile("sti; hlt; cli" ::: "memory");
