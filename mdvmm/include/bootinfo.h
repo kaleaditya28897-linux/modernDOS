@@ -14,7 +14,13 @@
 #define BP_RAW_TO_PM   2
 #define BP_CALLBACK    3        /* 16 real mode callbacks */
 #define BP_COUNT       19
-#define BOOTINFO_VERSION 2
+#define BOOTINFO_VERSION 3
+
+#define BOOT_DOS   0        /* started from DOS: real BIOS, DOS running */
+#define BOOT_UEFI  1        /* started from UEFI: no BIOS, core boots DOS */
+
+#define FB_RGBX    0        /* GOP PixelRedGreenBlueReserved8BitPerColor */
+#define FB_BGRX    1        /* GOP PixelBlueGreenRedReserved8BitPerColor */
 
 struct bootinfo {
   uint32_t magic;
@@ -31,6 +37,17 @@ struct bootinfo {
   uint16_t stub_entry;      /* offset of the DPMI mode switch entry */
   uint16_t stub_psp;        /* offset of word: PSP saved by the entry */
   uint16_t stub_retf;       /* offset of a RETF (no-op state save) */
+  /* version 3 */
+  uint32_t boot_type;       /* BOOT_DOS / BOOT_UEFI */
+  uint32_t fb_phys;         /* UEFI: GOP framebuffer, 32 bpp */
+  uint32_t fb_size;
+  uint32_t fb_width, fb_height;
+  uint32_t fb_pitch;        /* pixels per scan line */
+  uint32_t fb_format;       /* FB_RGBX / FB_BGRX */
+  uint32_t ramdisk_phys;    /* UEFI: boot disk image (floppy) */
+  uint32_t ramdisk_size;
+  uint32_t conv_kb;         /* UEFI: usable conventional memory */
+  uint32_t rsdp;            /* UEFI: ACPI RSDP (0 = none) */
 } __attribute__((packed));
 
 #endif

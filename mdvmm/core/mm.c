@@ -117,6 +117,11 @@ void mm_init(uint32_t free_phys)
           (pool_end - next_free) / 1024);
 }
 
+void *pool_ptr(uint32_t phys)
+{
+  return pool_virt(phys);
+}
+
 /* physically contiguous, size aligned block below 16MB (ISA DMA), taken
    from the untouched part of the pool; call early. 0 if not possible. */
 uint32_t page_alloc_isa(uint32_t size)

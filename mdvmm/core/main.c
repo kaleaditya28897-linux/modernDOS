@@ -44,5 +44,7 @@ void core_main(struct bootinfo *bi, uint32_t free_phys)
   cpu_init();
   dma_init();
   dpmi_init();
+  if (boot.boot_type == BOOT_UEFI)
+    bios_init();                /* no PC BIOS: provide one, boot DOS */
   v86_start();
 }

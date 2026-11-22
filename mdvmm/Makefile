@@ -1,10 +1,13 @@
 # MDVMM - modernDOS virtual machine monitor
-# Builds build/MDVMM.COM (16-bit DOS loader with the 32-bit core embedded).
+# Builds build/MDVMM.COM (16-bit DOS loader with the 32-bit core embedded)
+# and build/BOOTX64.EFI (UEFI loader with the same core embedded).
 
 CC      = i686-linux-gnu-gcc
 LD      = i686-linux-gnu-ld
 OBJCOPY = i686-linux-gnu-objcopy
 NASM    = nasm
+CC64    = gcc
+LD64    = ld
 
 CFLAGS  = -m32 -std=gnu11 -O2 -Wall -Wextra -Werror \
           -ffreestanding -fno-builtin -fno-pic -fno-pie -fno-stack-protector \
@@ -13,16 +16,27 @@ CFLAGS  = -m32 -std=gnu11 -O2 -Wall -Wextra -Werror \
 NFLAGS  = -Iinclude/
 
 B       = build
-COBJS   = $(B)/entry.o $(B)/main.o $(B)/lib.o $(B)/mm.o $(B)/cpu.o $(B)/v86.o $(B)/dpmi.o $(B)/vm.o $(B)/dma.o
+COBJS   = $(B)/entry.o $(B)/main.o $(B)/lib.o $(B)/mm.o $(B)/cpu.o $(B)/v86.o $(B)/dpmi.o $(B)/vm.o $(B)/dma.o \
+          $(B)/bios.o $(B)/fbcon.o $(B)/font.o $(B)/romimg.o
 HDRS    = core/core.h include/bootinfo.h
 
-all: $(B)/MDVMM.COM
+CFLAGS64 = -m64 -std=gnu11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-builtin \
+          -fpie -fno-stack-protector -mno-red-zone -mgeneral-regs-only \
+          -fno-asynchronous-unwind-tables -fshort-wchar -Iinclude -Iuefi
+
+all: $(B)/MDVMM.COM $(B)/BOOTX64.EFI
 
 $(B):
 	mkdir -p $(B)
 
 $(B)/entry.o: core/entry.asm include/bootinfo.inc | $(B)
 	$(NASM) $(NFLAGS) -f elf32 -o $@ $<
+
+$(B)/rom.bin: core/rom.asm include/bootinfo.inc | $(B)
+	$(NASM) $(NFLAGS) -f bin -o $@ $<
+
+$(B)/romimg.o: core/romimg.asm $(B)/rom.bin
+	$(NASM) $(NFLAGS) -I$(B)/ -f elf32 -o $@ $<
 
 $(B)/%.o: core/%.c $(HDRS) | $(B)
 	$(CC) $(CFLAGS) -c -o $@ $<
@@ -35,6 +49,16 @@ $(B)/core.bin: $(B)/core.elf
 
 $(B)/MDVMM.COM: loader/loader.asm $(B)/core.bin include/bootinfo.inc
 	$(NASM) $(NFLAGS) -I$(B)/ -f bin -o $@ $<
+
+$(B)/uefi_main.o: uefi/main.c uefi/efi.h include/bootinfo.h | $(B)
+	$(CC64) $(CFLAGS64) -c -o $@ $<
+
+$(B)/uefi_start.o: uefi/start.asm $(B)/core.bin
+	$(NASM) -I$(B)/ -f elf64 -o $@ $<
+
+$(B)/BOOTX64.EFI: $(B)/uefi_main.o $(B)/uefi_start.o uefi/efi.ld
+	$(LD64) -m i386pep --subsystem 10 --image-base 0x10000000 -e efi_main --enable-reloc-section -nostdlib \
+	  -T uefi/efi.ld -o $@ $(B)/uefi_main.o $(B)/uefi_start.o
 
 clean:
 	rm -rf $(B)

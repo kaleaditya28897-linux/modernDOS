@@ -392,6 +392,8 @@ static void v86_gp(struct frame *f)
         dpmi_v86_bp(f, ip - boot.stub_bp);
         return;
       }
+      if (bios_bp(f, ip))
+        return;
       f->eip = (uint16_t)(ip + len);
       halt(f);
       return;
@@ -457,7 +459,7 @@ void v86_start(void)
   f->fs = boot.fs;
   f->gs = boot.gs;
   f->eflags = EFL_VM | EFL_IF | 0x2 | (boot.eflags & EFL_USER);
-  vm1.vif = 0;                  /* the loader executes STI first */
+  vm1.vif = boot.boot_type == BOOT_UEFI; /* the DOS loader executes STI */
   vm1.pending = 0;
   kprintf("v86: entering VM1 at %04x:%04x\n", boot.cs, boot.ip);
   enter_frame(f);

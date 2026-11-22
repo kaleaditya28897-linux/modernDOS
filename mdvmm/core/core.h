@@ -92,6 +92,7 @@ int map_page(uint32_t lin, uint32_t phys, uint32_t flags);
 uint32_t unmap_page(uint32_t lin);
 uint32_t lin_to_pte(uint32_t lin);
 void *kmap(int slot, uint32_t phys);
+void *pool_ptr(uint32_t phys);              /* pool page, mapped at KBASE */
 void phys_copy(uint32_t dst, uint32_t src, uint32_t len);
 
 /* cpu.c */
@@ -129,6 +130,8 @@ void dpmi_rm_exit(void);
 int dpmi_active(void);
 
 /* vm.c */
+#define VRAM_PAGES 8
+extern uint32_t vram_phys[VRAM_PAGES];
 void vm_tick(struct frame *f);
 void vm_poll(struct frame *f);
 void vm_yield(struct frame *f);
@@ -136,6 +139,14 @@ int vm_kbd(struct frame *f);
 int vm_port60(uint8_t *v);
 int vm_api(struct frame *f);
 void vm_crit(struct frame *f);
+
+/* bios.c, fbcon.c (UEFI boot: virtual PC BIOS) */
+#define ROM_SEG 0xF000
+void bios_init(void);
+int bios_bp(struct frame *f, uint16_t ip);
+void fbcon_init(void);
+void fbcon_update(void);
+void serial_putc(uint8_t c);
 
 /* dma.c */
 void dma_init(void);

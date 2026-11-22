@@ -21,7 +21,6 @@
 #define SLICE_TICKS   2                 /* ~110 ms per time slice */
 #define KQ_SIZE       32
 #define VRAM          0xB8000u
-#define VRAM_PAGES    8
 #define INST_BASE     0xEE000000u       /* instance data copies, 1MB each */
 
 struct range { uint32_t lin, size; };
@@ -36,6 +35,12 @@ struct session {
   uint32_t tick_mark;
   uint8_t kq[KQ_SIZE];                  /* queued scancodes */
   int kq_head, kq_tail;
+};
+
+/* physical pages of the visible text screen: VGA memory, or RAM that
+   fbcon.c draws on a UEFI framebuffer */
+uint32_t vram_phys[VRAM_PAGES] = {
+  0xB8000, 0xB9000, 0xBA000, 0xBB000, 0xBC000, 0xBD000, 0xBE000, 0xBF000
 };
 
 static struct session ses[MAX_SESSIONS];
@@ -136,7 +141,7 @@ static void map_session(int n)
   for (p = first_private; p < 0xa0; p++)
     map_page(p << 12, s->pages[p] ? s->pages[p] : p << 12, 7);
   for (p = 0; p < VRAM_PAGES; p++)
-    map_page(VRAM + p * 4096, n == focus ? VRAM + p * 4096 : s->vram[p], 7);
+    map_page(VRAM + p * 4096, n == focus ? vram_phys[p] : s->vram[p], 7);
 }
 
 /* in-service IRQs at the PICs */
@@ -269,8 +274,8 @@ static void set_focus(int n)
     return;
   for (i = 0; i < VRAM_PAGES; i++)
   {
-    phys_copy(ses[old].vram[i], VRAM + i * 4096, 4096);
-    phys_copy(VRAM + i * 4096, ses[n].vram[i], 4096);
+    phys_copy(ses[old].vram[i], vram_phys[i], 4096);
+    phys_copy(vram_phys[i], ses[n].vram[i], 4096);
   }
   focus = n;
   map_session(cur);
@@ -443,7 +448,7 @@ static void vm_end(struct frame *f)
   {
     int i;
     for (i = 0; i < VRAM_PAGES; i++)
-      phys_copy(VRAM + i * 4096, ses[0].vram[i], 4096);
+      phys_copy(vram_phys[i], ses[0].vram[i], 4096);
     focus = 0;
   }
   free_session_pages(&ses[n]);

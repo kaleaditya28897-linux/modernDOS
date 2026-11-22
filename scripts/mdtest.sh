@@ -3,6 +3,8 @@
 #  - upstream boot test (test/test.sh) for every kernel that was built
 #  - long filename API + DJGPP libc test (tests/lfn/run.sh), GCC kernel
 #  - MDVMM supervisor: DOS + tests inside the V86 monitor (tests/mdvmm/run.sh)
+#  - UEFI boot: OVMF -> BOOTX64.EFI -> MDVMM core + virtual BIOS -> DOS
+#    (tests/uefi/run.sh)
 . "$(dirname "$0")/mdenv.sh"
 md_run bash -c '
   rc=0
@@ -12,5 +14,6 @@ md_run bash -c '
   done
   tests/lfn/run.sh _output/gcc/kgc8632.sys || rc=1
   tests/mdvmm/run.sh _output/gcc/kgc8632.sys || rc=1
+  tests/uefi/run.sh _output/gcc/kgc8632.sys || rc=1
   exit $rc
 '
