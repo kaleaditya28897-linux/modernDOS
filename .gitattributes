@@ -12,3 +12,5 @@ tests/uefi/*.sh text eol=lf
 mdvmm/** text eol=lf
 release/*.sh text eol=lf
 tests/iso/*.sh text eol=lf
+gui/** text eol=lf
+tests/gui/*.py text eol=lf

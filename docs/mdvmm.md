@@ -181,7 +181,8 @@ The core then sets up a PC (`bios.c`):
 - INT 10h: text mode 3 on RAM at B8000h. `fbcon.c` draws changed cells
   and the cursor on the framebuffer every timer tick, with the 8x16 font
   scaled up to 2x. Teletype output is mirrored to COM1 when a UART exists.
-  Graphics modes and VESA are not provided yet.
+  VBE 3.0 with one mode (141h): the GOP framebuffer, 32 bpp linear; the
+  console stops drawing while it is set (see `docs/gui.md`).
 - INT 13h: the disk image as floppy drive 00h (geometry from its BPB);
   writes go to memory only. Hard disks from native drivers are drives
   80h and up (BIOS data area 40:75h): CHS functions with a 255/63
