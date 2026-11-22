@@ -144,11 +144,12 @@ static void halt(struct frame *f)
 /* intercepted software interrupts                                  */
 
 /* physical address of a block move address: the V86 address space (first
-   1MB + 64K) is paged (private session memory), extended memory is not */
+   1MB + 64K) is paged (private session memory); extended memory goes
+   through ext_phys (UEFI boots). 0 if invalid. */
 static uint32_t move_phys(uint32_t a)
 {
   if (a >= 0x110000)
-    return a;
+    return ext_phys(a);
   return (lin_to_pte(a) & ~0xfffu) | (a & 0xfff);
 }
 
@@ -173,7 +174,14 @@ static void int15_move(struct frame *f)
       n = 4096 - (dst & 0xfff);
     if (n > len)
       n = len;
-    phys_copy(move_phys(dst), move_phys(src), n);
+    uint32_t pd = move_phys(dst), ps = move_phys(src);
+    if (!pd || !ps)
+    {
+      AH(f) = 0x02;                     /* outside extended memory */
+      set_cf(f, 1);
+      return;
+    }
+    phys_copy(pd, ps, n);
     src += n;
     dst += n;
     len -= n;

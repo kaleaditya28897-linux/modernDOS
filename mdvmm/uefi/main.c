@@ -14,6 +14,8 @@
 
 #define POOL_MB_MAX   32
 #define POOL_MB_MIN   8
+#define XMS_MB_MAX    64              /* DOS extended memory */
+#define XMS_MB_MIN    1
 #define BOOT_IMAGE    u"\\MODERNDOS\\BOOT.IMG"
 
 extern const uint8_t core_image[], core_image_end[];
@@ -173,7 +175,8 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *systab)
 {
   struct bootinfo *bi;
   uint64_t rd_addr, rd_size, pool, low, core_size = (uint64_t)(core_image_end - core_image);
-  uint32_t pool_mb, conv;
+  uint32_t pool_mb, xms_mb, conv;
+  uint64_t xms = 0;
   UINTN map_size, map_key, desc_size, i;
   uint32_t desc_ver;
   EFI_STATUS s;
@@ -195,11 +198,20 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *systab)
   }
   if (pool_mb < POOL_MB_MIN)
     return fail(u"not enough memory below 4GB", 1);
+  /* extended memory for DOS (XMS, HMA): contiguous, below 4GB */
+  for (xms_mb = XMS_MB_MAX; xms_mb >= XMS_MB_MIN; xms_mb /= 2)
+  {
+    xms = 0xffffffffull;
+    if (!bs->AllocatePages(AllocateMaxAddress, EfiLoaderData, xms_mb * 256, &xms))
+      break;
+  }
+  if (xms_mb < XMS_MB_MIN)
+    xms_mb = 0, xms = 0;
   /* one page in conventional memory: hand-over code, GDT, stack, bootinfo */
   low = 0x9ffff;
   if ((s = bs->AllocatePages(AllocateMaxAddress, EfiLoaderData, 1, &low)))
     return fail(u"no page below 640K", s);
-  if (pool < 0x110000 || rd_addr < 0x110000)
+  if (pool < 0x110000 || rd_addr < 0x110000 || (xms && xms < 0x110000))
     return fail(u"memory allocated in the DOS address space", 1);
 
   memset((void *)low, 0, 4096);
@@ -212,6 +224,8 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *systab)
   bi->core_size = (uint32_t)core_size;
   bi->ramdisk_phys = (uint32_t)rd_addr;
   bi->ramdisk_size = (uint32_t)rd_size;
+  bi->xms_phys = (uint32_t)xms;
+  bi->xms_size = xms_mb << 20;
   find_framebuffer(bi);
   for (i = 0; i < st->NumberOfTableEntries; i++)
     if (guid_eq(&st->ConfigurationTable[i].VendorGuid, &acpi20_guid))

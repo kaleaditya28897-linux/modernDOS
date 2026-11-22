@@ -7,7 +7,6 @@
  */
 #include "core.h"
 
-#define FB_VIRT  0xE0000000u
 #define COLS     80
 #define ROWS     25
 
@@ -36,6 +35,8 @@ void fbcon_init(void)
     kprintf("fbcon: no usable framebuffer\n");
     return;
   }
+  if (boot.fb_size > FB_MAX)
+    boot.fb_size = FB_MAX;
   pages = (boot.fb_size + 4095) / 4096;
   for (i = 0; i < pages; i++)
     if (!map_page(FB_VIRT + i * 4096, boot.fb_phys + i * 4096, 3))

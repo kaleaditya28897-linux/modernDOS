@@ -209,6 +209,10 @@ resumed:
         mov     dx, msg_active
         call    print
 
+; Register this block as the end of global memory for DOS sessions and
+; stay resident. Also entered from 'command' when the monitor was started
+; by the UEFI loader and sessions are not set up yet.
+register:
         ; Everything below the end of this resident block is global to
         ; all DOS sessions, memory above is per session. Round the block
         ; up so that the boundary is page aligned. (The environment is
@@ -274,6 +278,22 @@ resumed:
 command:
         mov     si, 81h
         call    skip_spaces
+        cmp     byte [si], 13
+        jne     .new
+        ; no arguments: set up DOS sessions if nobody did (UEFI boot)
+        mov     ax, (MDVMM_MPX << 8) | 06h
+        int     2fh
+        test    dx, dx
+        jnz     .already
+        mov     dx, msg_sessions
+        call    print
+        jmp     register
+.already:
+        mov     dx, msg_already
+        call    print
+        mov     ax, 4c00h
+        int     21h
+.new:
         mov     di, kw_new
         mov     cx, 3
 .cmp:   lodsb
@@ -440,6 +460,8 @@ fail:
 ; ----------------------------------------------------------------------
 msg_banner  db  'MDVMM - modernDOS virtual machine monitor', 13, 10, '$'
 msg_switch  db  'Starting monitor...', 13, 10, '$'
+msg_sessions db 'Monitor active (UEFI boot): setting up DOS sessions.', 13, 10, '$'
+msg_already db  'MDVMM is already active.', 13, 10, '$'
 msg_active  db  'MDVMM active: DOS is running in a virtual machine.', 13, 10, '$'
 msg_386     db  'MDVMM needs a 386 or later CPU.', 13, 10, '$'
 msg_pm      db  'CPU already in protected/V86 mode (MDVMM, EMM386 or a', 13, 10

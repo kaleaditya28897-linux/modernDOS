@@ -654,8 +654,12 @@ static void api_physmap(struct frame *f)
     if (!size || cl.next_phys + size > PHYSMAP_END)
       return api_error(f, ERR_LINEAR);
     for (off = 0; off < size; off += 4096)
-      if (!map_page(cl.next_phys + off, first + off, 0x17))     /* PCD */
+    {
+      /* DOS extended memory (UEFI boot: XMS window), else devices */
+      uint32_t ext = boot.boot_type == BOOT_UEFI ? ext_phys(first + off) : 0;
+      if (!map_page(cl.next_phys + off, ext ? ext : first + off, ext ? 7 : 0x17))  /* PCD */
         return api_error(f, ERR_PHYSICAL);
+    }
     lin = cl.next_phys + (phys & 0xfff);
     cl.next_phys += size + 4096;
   }

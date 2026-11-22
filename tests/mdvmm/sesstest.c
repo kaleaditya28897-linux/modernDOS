@@ -152,12 +152,27 @@ static int background(void)
   return 0;
 }
 
+/* hotkeys from the harness may come at any time: watch the focus go to
+   session 1 and back to 0 during the whole foreground test */
+static int seen_focus1, seen_focus0;
+
+static void watch_focus(void)
+{
+  unsigned running, focus, count;
+
+  sessions(&running, &focus, &count);
+  if (focus == 1)
+    seen_focus1 = 1;
+  if (seen_focus1 && focus == 0)
+    seen_focus0 = 1;
+}
+
 static int foreground(void)
 {
   unsigned running, focus, count, i;
   unsigned long t;
   long s0, s1;
-  int seen_focus1 = 0, seen_focus0 = 0, ok, h, n;
+  int ok, h, n;
 
   out("\nsessions test\n");
   sessions(&running, &focus, &count);
@@ -170,7 +185,7 @@ static int foreground(void)
     sprintf(buf, "fg %03u\r\n", i);
     append("A:\\FG.TXT", buf);
     for (t = ticks(); ticks() - t < 1;)
-      ;                                 /* spin, no INT 28h / HLT */
+      watch_focus();                    /* spin, no INT 28h / HLT */
   }
   s1 = file_size("A:\\BG.TXT");
   sprintf(buf, "         BG.TXT %ld -> %ld bytes while busy\n", s0, s1);
@@ -179,13 +194,7 @@ static int foreground(void)
 
   /* hotkeys from the harness: focus 1, then back to 0 */
   for (t = ticks(); ticks() - t < 18 * 40 && !(seen_focus1 && seen_focus0);)
-  {
-    sessions(&running, &focus, &count);
-    if (focus == 1)
-      seen_focus1 = 1;
-    if (seen_focus1 && focus == 0)
-      seen_focus0 = 1;
-  }
+    watch_focus();
   check(seen_focus1, "Ctrl+Alt+F2 focused session 1");
   check(seen_focus0, "Ctrl+Alt+F1 focused session 0 again");
 

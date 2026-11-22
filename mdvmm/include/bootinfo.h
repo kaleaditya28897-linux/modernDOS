@@ -14,7 +14,7 @@
 #define BP_RAW_TO_PM   2
 #define BP_CALLBACK    3        /* 16 real mode callbacks */
 #define BP_COUNT       19
-#define BOOTINFO_VERSION 3
+#define BOOTINFO_VERSION 4
 
 #define BOOT_DOS   0        /* started from DOS: real BIOS, DOS running */
 #define BOOT_UEFI  1        /* started from UEFI: no BIOS, core boots DOS */
@@ -48,6 +48,9 @@ struct bootinfo {
   uint32_t ramdisk_size;
   uint32_t conv_kb;         /* UEFI: usable conventional memory */
   uint32_t rsdp;            /* UEFI: ACPI RSDP (0 = none) */
+  /* version 4 */
+  uint32_t xms_phys;        /* UEFI: DOS extended memory (from 1MB on, */
+  uint32_t xms_size;        /* HMA first), physically contiguous */
 } __attribute__((packed));
 
 #endif

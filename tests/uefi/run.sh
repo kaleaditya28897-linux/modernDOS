@@ -4,10 +4,16 @@
 # OVMF boots \EFI\BOOT\BOOTX64.EFI from a FAT ESP. The loader starts the
 # MDVMM core, which provides a PC BIOS (text console on the GOP
 # framebuffer, keyboard, timer, INT 13h on \MODERNDOS\BOOT.IMG) and boots
-# the modernDOS floppy image in V86 mode. AUTOEXEC.BAT then runs:
+# the modernDOS floppy image in V86 mode. CONFIG.SYS loads HIMEMX on the
+# extended memory the virtual BIOS reports (DOS=HIGH). AUTOEXEC.BAT runs:
+#   MDVMM    - no monitor to load: sets up DOS sessions
 #   V86CHK   - V86 mode, MDVMM API
+#   XMSTEST  - XMS moves (INT 15h AH=87h through the extended memory window)
 #   LFNTEST  - long filename suite (heavy INT 21h, timer, disk)
 #   DJTEST   - DJGPP program, MDVMM as DPMI host
+#   DPMITEST - DPMI host test
+#   MDVMM NEW BG.BAT + SESSTEST /FG - a second session; the harness presses
+#              Ctrl+Alt+F2/F1
 # and leaves FreeCOM at its prompt, where the harness types (QEMU sendkey)
 #   ECHO Typed: aB3!~   and then   A:\POWEROFF
 # The console is mirrored to COM1 (serial.log); MDVMM and the tests log
@@ -28,23 +34,36 @@ OVMF=/usr/share/ovmf/OVMF.fd
 
 echo "== building MDVMM and test programs"
 make -s -C "$ROOT/mdvmm"
-for p in v86chk poweroff; do
+for p in v86chk poweroff xmstest; do
   "$NASM" -f bin -o "$WORK/$p.com" "$ROOT/tests/mdvmm/$p.asm"
 done
 ia16-elf-gcc -mcmodel=small -Os -o "$WORK/lfntest.exe" "$ROOT/tests/lfn/lfntest.c" -li86
-/opt/djgpp/bin/i586-pc-msdosdjgpp-gcc -O2 -o "$WORK/djtest.exe" "$ROOT/tests/lfn/djtest.c"
+ia16-elf-gcc -mcmodel=small -Os -o "$WORK/sesstest.exe" "$ROOT/tests/mdvmm/sesstest.c" -li86
+DJGPP=/opt/djgpp/bin/i586-pc-msdosdjgpp-gcc
+"$DJGPP" -O2 -o "$WORK/djtest.exe" "$ROOT/tests/lfn/djtest.c"
+"$DJGPP" -O2 -o "$WORK/dpmitest.exe" "$ROOT/tests/mdvmm/dpmitest.c"
 
 echo "== building the DOS boot image"
 cd "$WORK"
-printf 'SHELL=A:\\COMMAND.COM A:\\ /E:512 /P\r\n' > fdconfig.sys
+printf 'DEVICE=A:\\HIMEMX.EXE\r\nDOS=HIGH\r\nSHELL=A:\\COMMAND.COM A:\\ /E:512 /P\r\n' > fdconfig.sys
 cat > autoexec.bat <<'EOF'
 @ECHO OFF
 ECHO Hello from DOS on UEFI
+A:\MDVMM.COM
+IF ERRORLEVEL 1 GOTO END
 A:\V86CHK.COM
+IF ERRORLEVEL 1 GOTO END
+A:\XMSTEST.COM
 IF ERRORLEVEL 1 GOTO END
 A:\LFNTEST.EXE /T
 IF ERRORLEVEL 1 GOTO END
 A:\DJTEST.EXE
+IF ERRORLEVEL 1 GOTO END
+A:\DPMITEST.EXE
+IF ERRORLEVEL 1 GOTO END
+A:\MDVMM.COM NEW A:\BG.BAT
+IF ERRORLEVEL 1 GOTO END
+A:\SESSTEST.EXE /FG
 IF ERRORLEVEL 1 GOTO END
 DIR A:\ /W
 ECHO UEFI BOOT: success
@@ -54,6 +73,7 @@ A:\POWEROFF.COM
 :PROMPT
 EOF
 sed -i 's/$/\r/' autoexec.bat
+printf '@ECHO OFF\r\nA:\\SESSTEST.EXE /BG\r\nECHO done>A:\\BGDONE.TXT\r\n' > bg.bat
 
 "$NASM" "$TEST/ldosboot/boot.asm" -w-user -I"$TEST/lmacros/" \
   -D_COMPAT_FREEDOS=1 -D_LBA=0 -D_USE_PART_INFO=0 -D_QUERY_GEOMETRY=0 \
@@ -72,6 +92,12 @@ mcopy -i boot.img v86chk.com ::V86CHK.COM
 mcopy -i boot.img poweroff.com ::POWEROFF.COM
 mcopy -i boot.img lfntest.exe ::LFNTEST.EXE
 mcopy -i boot.img djtest.exe ::DJTEST.EXE
+mcopy -i boot.img /opt/fdos/bin/himemx.exe ::HIMEMX.EXE
+mcopy -i boot.img "$ROOT/mdvmm/build/MDVMM.COM" ::MDVMM.COM
+mcopy -i boot.img xmstest.com ::XMSTEST.COM
+mcopy -i boot.img dpmitest.exe ::DPMITEST.EXE
+mcopy -i boot.img sesstest.exe ::SESSTEST.EXE
+mcopy -i boot.img bg.bat ::BG.BAT
 printf 'hello from linux\n' > linux.txt
 mcopy -i boot.img linux.txt "::Created On Linux.txt"     # LFNTEST fixture
 
@@ -102,24 +128,39 @@ while True:
 PY
   shot_pid=$!
 fi
-# keyboard: once the batch is done, type at the prompt
+# keyboard: Ctrl+Alt+F2/F1 while the sessions test runs, then (once the
+# batch is done) type at the prompt
 python3 - "$WORK" <<'PY' &
 import os, socket, sys, time
 work = sys.argv[1]
 serial, sock = os.path.join(work, "serial.log"), os.path.join(work, "mon.sock")
+debug = os.path.join(work, "debug.log")
+def text(path):
+    try:
+        return open(path, "rb").read()
+    except OSError:
+        return b""
+def send(cmd):
+    s = socket.socket(socket.AF_UNIX); s.connect(sock)
+    s.sendall((cmd + "\n").encode()); time.sleep(0.15); s.close()
+deadline = time.time() + 170
+while time.time() < deadline and b"sessions test" not in text(debug):
+    time.sleep(0.2)
+i = 0
+while time.time() < deadline and b"SESSIONS:" not in text(debug):
+    try:
+        send("sendkey " + ["ctrl-alt-f2", "ctrl-alt-f1"][i % 2])
+    except OSError:
+        break
+    i += 1
+    time.sleep(1.5)
 names = {" ": "spc", ":": "shift-semicolon", "!": "shift-1", "~": "shift-grave_accent",
          "\\": "backslash", "\n": "ret"}
 def key(c):
     if c in names:
         return names[c]
     return "shift-" + c.lower() if c.isupper() else c
-deadline = time.time() + 110
-while time.time() < deadline:
-    try:
-        if b"UEFI BOOT: success" in open(serial, "rb").read():
-            break
-    except OSError:
-        pass
+while time.time() < deadline and b"UEFI BOOT: success" not in text(serial):
     time.sleep(0.5)
 time.sleep(2)
 try:
@@ -132,7 +173,7 @@ except OSError:
     pass
 PY
 keys_pid=$!
-timeout --foreground 120 qemu-system-x86_64 -m 128 -bios "$OVMF" \
+timeout --foreground 180 qemu-system-x86_64 -m 256 -bios "$OVMF" \
   -drive file=esp.img,format=raw,if=ide -net none -display none \
   -debugcon file:debug.log -serial file:serial.log -no-reboot \
   -monitor unix:mon.sock,server,nowait $QEMU_EXTRA </dev/null || true
@@ -146,8 +187,10 @@ sed 's/\r$//; s/\x1b\[[0-9;]*[A-Za-z]//g' serial.log | tr -d '\000' | grep -a -v
 echo "== checks"
 fail=0
 for marker in "MDVMM core:" "bios: disk image" "fbcon:" "v86: entering VM1" \
-              "v86chk: protected mode bit set" "RESULT: PASSED" "dpmi: 32 bit client" \
-              "DJGPP: 0 failures"; do
+              "vm: sessions enabled" "v86chk: protected mode bit set" \
+              "xmstest: 4K round trip" "RESULT: PASSED" "dpmi: 32 bit client" \
+              "DJGPP: 0 failures" "DPMI: 0 failures" "vm: session 1 ended" \
+              "SESSIONS: 0 failures"; do
   if grep -q "$marker" debug.log; then echo "  ok   log: $marker"; else
     echo "  FAIL log missing: $marker"; fail=1; fi
 done

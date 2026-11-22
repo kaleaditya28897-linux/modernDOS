@@ -9,15 +9,14 @@
  *    as floppy drive 00h
  *  - INT 16h / IRQ1: PS/2 keyboard, scancode set 1
  *  - INT 1Ah / IRQ0: PIT ticks, RTC
- *  - INT 11h, 12h, 14h, 15h, 17h, 18h, 19h: the usual small things
+ *  - INT 15h: extended memory (E820h/E801h/88h) for an XMS driver: the
+ *    loader's region, seen by DOS at 1MB (HMA first); see ext_phys()
+ *  - INT 11h, 12h, 14h, 17h, 18h, 19h: the usual small things
  * After setting up the IVT and BIOS data area, the boot sector of the
  * disk image is started at 0000:7C00, as a BIOS would.
  */
 #include "core.h"
 
-#define FB_VIRT       0xE0000000u       /* framebuffer (fbcon.c) */
-#define RD_VIRT       0xE8000000u       /* boot disk image, up to 64MB */
-#define RD_MAX        0x4000000u
 
 /* addresses in the ROM table, order of rom.asm */
 enum rom_id {
@@ -54,6 +53,43 @@ static void set_vec(int v, uint16_t seg, uint16_t off)
 {
   ((uint16_t *)0)[v * 2] = off;
   ((uint16_t *)0)[v * 2 + 1] = seg;
+}
+
+/* ---------------------------------------------------------------- */
+/* extended memory                                                  */
+
+/* DOS extended memory address (as an XMS driver or DPMI client sees it)
+   -> physical address. On UEFI boots DOS sees the loader's region at
+   1MB; 0 if the address is outside it. Identity on DOS boots. */
+uint32_t ext_phys(uint32_t a)
+{
+  if (boot.boot_type != BOOT_UEFI)
+    return a;
+  if (a < 0x100000 || a - 0x100000 >= boot.xms_size)
+    return 0;
+  return boot.xms_phys + (a - 0x100000);
+}
+
+static void e820(struct frame *f)
+{
+  struct entry { uint64_t base, len; uint32_t type; } __attribute__((packed)) e[3];
+  uint32_t conv = BDA16(0x13) * 1024u, n = 0, i = f->ebx;
+
+  e[n].base = 0, e[n].len = conv, e[n++].type = 1;
+  e[n].base = conv, e[n].len = 0x100000 - conv, e[n++].type = 2;
+  if (boot.xms_size)
+    e[n].base = 0x100000, e[n].len = boot.xms_size, e[n++].type = 1;
+  if (f->edx != 0x534d4150 || i >= n || (f->ecx & 0xffff) < 20)
+  {
+    AH(f) = 0x86;
+    set_flag(f, EFL_CF, 1);
+    return;
+  }
+  memcpy(rm_ptr(f->es, DI(f)), &e[i], 20);
+  f->eax = 0x534d4150;
+  f->ecx = 20;
+  f->ebx = i + 1 < n ? i + 1 : 0;
+  set_flag(f, EFL_CF, 0);
 }
 
 /* ---------------------------------------------------------------- */
@@ -723,9 +759,23 @@ static void int15(struct frame *f)
     case 0x91:
       AH(f) = 0;
       return;
-    case 0x88:                          /* no extended memory for DOS */
-      AX(f) = 0;
+    case 0x88:                          /* KB above 1MB */
+      AX(f) = boot.xms_size / 1024 > 0xffff ? 0xffff : (uint16_t)(boot.xms_size / 1024);
       return;
+    case 0xe8:
+      if (AL(f) == 0x01)                /* KB 1-16MB, 64K blocks above */
+      {
+        uint32_t kb = boot.xms_size / 1024;
+        AX(f) = CX(f) = (uint16_t)(kb > 15 * 1024 ? 15 * 1024 : kb);
+        BX(f) = DX(f) = (uint16_t)(kb > 15 * 1024 ? (kb - 15 * 1024) / 64 : 0);
+        return;
+      }
+      if (AL(f) == 0x20)
+      {
+        e820(f);
+        return;
+      }
+      break;
     case 0xc0:
       f->es = ROM_SEG;
       BX(f) = rom[R_CONFIG];
@@ -828,6 +878,13 @@ void bios_init(void)
     if (!vram_phys[p] || !map_page(0xb8000 + p * 4096, vram_phys[p], 7))
       panic("bios: out of memory");
   }
+  /* HMA: the first 64K of the extended memory region */
+  for (p = 0; p < 16; p++)
+  {
+    uint32_t page = boot.xms_size >= 0x10000 ? boot.xms_phys + p * 4096 : page_alloc();
+    if (!page || !map_page(0x100000 + p * 4096, page, 7))
+      panic("bios: out of memory");
+  }
   boot.stub_seg = ROM_SEG;
   boot.stub_bp = rom[R_STUB_BP];
   boot.stub_entry = rom[R_STUB_ENTRY];
@@ -895,5 +952,6 @@ void bios_init(void)
   boot.sp = 0x7c00;
   boot.ds = boot.es = boot.fs = boot.gs = 0;
   boot.eflags = EFL_IF;
-  kprintf("bios: %u KB conventional memory, booting the disk image\n", conv);
+  kprintf("bios: %u KB conventional memory, %u KB extended at %08x, booting the disk image\n",
+          conv, boot.xms_size / 1024, boot.xms_phys);
 }

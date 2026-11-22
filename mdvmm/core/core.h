@@ -7,7 +7,23 @@
 #include <stdarg.h>
 #include "bootinfo.h"
 
+/* Linear address space of the monitor:
+ *   00000000-0010FFFF  V86 machine (DOS), user
+ *   00400000-BEFFFFFF  DPMI client memory (dpmi.c CLIENT_BASE/END)
+ *   C0000000-DEFFFFFF  DPMI 0800h physical mappings (PHYSMAP_BASE/END)
+ *   E0000000-E0FFFFFF  DPMI host code page and stacks (HOST_AREA)
+ *   E1000000-E7FFFFFF  UEFI framebuffer (FB_VIRT)
+ *   E8000000-EBFFFFFF  UEFI boot disk image (RD_VIRT)
+ *   EE000000-EE3FFFFF  DOS session instance data (vm.c INST_BASE)
+ *   EFC00000-EFFFFFFF  temporary physical windows (mm.c KMAP_BASE)
+ *   F0000000-          the core and its pool (KBASE)
+ *   FFC00000-FFFFFFFF  page tables (recursive mapping)
+ */
 #define KBASE     0xF0000000u
+#define FB_VIRT   0xE1000000u
+#define FB_MAX    0x07000000u
+#define RD_VIRT   0xE8000000u
+#define RD_MAX    0x04000000u
 #define KCODE     0x08
 #define KDATA     0x10
 #define TSS_SEL   0x18
@@ -147,6 +163,7 @@ int bios_bp(struct frame *f, uint16_t ip);
 void fbcon_init(void);
 void fbcon_update(void);
 void serial_putc(uint8_t c);
+uint32_t ext_phys(uint32_t a);
 
 /* dma.c */
 void dma_init(void);

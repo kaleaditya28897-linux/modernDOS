@@ -489,7 +489,9 @@ int vm_api(struct frame *f)
       set_focus(BL(f));
       AX(f) = (uint16_t)focus;
       return 1;
-    case 0x06:                          /* AX = running, BX = focus, CX = count */
+    case 0x06:                          /* AX = running, BX = focus, CX = count,
+                                           DX = 1 if sessions are set up */
+      DX(f) = (uint16_t)registered;
       AX(f) = (uint16_t)cur;
       BX(f) = (uint16_t)focus;
       CX(f) = (uint16_t)nsessions;

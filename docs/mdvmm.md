@@ -12,7 +12,7 @@ and several DOS sessions.
 | M2.2 DPMI host | working: DPMI 0.9 for 16/32 bit clients; DJGPP programs run without CWSDPMI |
 | M2.3 multiple DOS sessions | working: up to 4 preemptively scheduled DOS sessions, Ctrl+Alt+F1..F4 |
 | M3.1 UEFI boot | working: BOOTX64.EFI starts the core, which provides a virtual PC BIOS (GOP text console, PS/2 keyboard, timer, RTC, disk image from the ESP) and boots DOS |
-| M3.2 UEFI: XMS, sessions | planned |
+| M3.2 UEFI: XMS, sessions | working: extended memory for XMS drivers (DOS=HIGH), DPMI, DOS sessions on UEFI boots |
 | M3.3-M3.5 native drivers | planned: AHCI, NVMe, USB (xHCI) keyboard |
 
 ## Using it
@@ -29,7 +29,9 @@ MDVMM NEW [command]      start another DOS session running COMSPEC
 
 On a UEFI PC (no CSM), copy `mdvmm/build/BOOTX64.EFI` to
 `\EFI\BOOT\BOOTX64.EFI` on the EFI system partition and a bootable DOS
-floppy image to `\MODERNDOS\BOOT.IMG`. See "UEFI boot" below.
+floppy image to `\MODERNDOS\BOOT.IMG`. The monitor is then already
+running when DOS starts; `MDVMM` without arguments (AUTOEXEC.BAT) only
+sets up DOS sessions. See "UEFI boot" below.
 
 MDVMM takes a 32 MB pool from XMS (less if less is free), moves itself there
 and keeps under 1 KB of conventional memory. DPMI programs allocate from the
@@ -73,7 +75,7 @@ Intercepted services:
 | INT 2Fh AX=DE03h | end the running session (not session 0) |
 | INT 2Fh AX=DE04h | loader registers the per-session DOS data (internal) |
 | INT 2Fh AX=DE05h | set focus: BL=session |
-| INT 2Fh AX=DE06h | AX=running session, BX=focused session, CX=number of sessions |
+| INT 2Fh AX=DE06h | AX=running session, BX=focused session, CX=number of sessions, DX=1 if sessions are set up |
 | ports 00-0F, C0-DF, 81-8F | ISA DMA controllers, virtualized (see below) |
 
 The monitor logs to I/O port E9h (QEMU `-debugcon`, Bochs).
@@ -157,6 +159,9 @@ services, leaves long mode (32-bit protected mode, paging off) and starts
 the core like the DOS loader does, with `boot_type = BOOT_UEFI` in
 `struct bootinfo` (version 3).
 
+It also allocates up to 64 MB of contiguous memory below 4 GB as DOS
+extended memory (`xms_phys`/`xms_size`, bootinfo version 4).
+
 The core then sets up a PC (`bios.c`):
 
 - `rom.asm` at F000:0000 (RAM from the pool). BIOS services are HLT
@@ -174,8 +179,13 @@ The core then sets up a PC (`bios.c`):
   Writes go to memory only.
 - INT 16h / IRQ1: PS/2 keyboard (scancode set 1), BIOS keyboard buffer,
   INT 15h AH=4Fh hook, Ctrl+Alt+Del reboots.
-- INT 1Ah (ticks, CMOS RTC), INT 11h, 12h, 14h, 15h (C0h, 24h, 4Fh,
-  88h = no extended memory), 17h, 18h, 19h.
+- Extended memory: DOS sees the loader's region at 1 MB, through INT 15h
+  E820h, E801h and 88h, so any XMS driver works (HIMEMX, `DOS=HIGH`).
+  The HMA (linear 100000h-10FFFFh) is mapped to its first 64 KB. INT 15h
+  AH=87h block moves and DPMI 0800h mappings translate addresses in this
+  window (`ext_phys`); moves outside it fail.
+- INT 1Ah (ticks, CMOS RTC), INT 11h, 12h, 14h, 15h (C0h, 24h, 4Fh),
+  17h, 18h, 19h.
 
 Finally the boot sector of the disk image is started at 0000:7C00, as a
 BIOS does, and loads the kernel.
@@ -186,10 +196,9 @@ BIOS does, and loads the kernel.
   VCPI) stop the machine with a monitor panic. VCPI is not planned.
 - Reprogramming the PIC vector base from DOS is not virtualized.
 - A20 is always enabled (programs relying on 1 MB wraparound need LOADFIX).
-- UEFI boot (M3.1): no XMS (no INT 15h memory map yet), so no DOS
-  sessions (they need MDVMM.COM's registration); the disk is a RAM copy
-  of the image; PS/2 keyboard only; text mode only; framebuffer must be
-  below 4 GB and 32 bpp RGB/BGR.
+- UEFI boot: the disk is a RAM copy of the image (writes are lost);
+  PS/2 keyboard only; text mode only; the framebuffer must be below 4 GB
+  and 32 bpp RGB/BGR; no ISA DMA (no bounce buffer below 16 MB).
 - Sessions: no switching while a DPMI client runs; a DPMI client doing
   its own DMA in a session other than 0 gets wrong addresses; graphics
   modes are not virtualized (the focused session owns the screen only in
@@ -209,7 +218,8 @@ memory and descriptors. There is no CWSDPMI on the test disk. Extra QEMU
 options can be passed in `QEMU_EXTRA`, for example `-d int,cpu_reset -D qemu.log`.
 
 `tests/uefi/run.sh` boots OVMF from a FAT ESP holding BOOTX64.EFI and the
-DOS image, runs V86CHK, LFNTEST and DJTEST (DPMI from the virtual ROM),
+DOS image (HIMEMX, `DOS=HIGH`), runs the MDVMM test programs (V86CHK,
+XMSTEST, LFNTEST, DJTEST, DPMITEST, a second session with SESSTEST),
 then types a command at the FreeCOM prompt through QEMU `sendkey` and
 checks the echo in the COM1 mirror of the screen. `SCREEN=file.ppm` saves
 the framebuffer.
