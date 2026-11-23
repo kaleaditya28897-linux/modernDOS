@@ -6,6 +6,8 @@
  *   V86 side: HLT bytes in the loader's resident stub (BP_* in bootinfo.h)
  *   PM side:  a ring 3 host code page full of HLT (HBP_* below)
  * Nested transitions are kept on a small stack of saved frames.
+ * The client belongs to the DOS session it started in (vm.c); the other
+ * sessions keep running around it and never see its handlers.
  */
 #include "core.h"
 
@@ -71,7 +73,7 @@ static struct desc ldt[LDT_ENTRIES] __attribute__((aligned(8)));
 static uint8_t ldt_used[LDT_ENTRIES];
 
 static struct client {
-  int active, bits32;
+  int active, bits32, session;
   uint16_t psp, env_seg, env_sel;
   uint16_t rm_ss, rm_sp;                /* host real mode stack */
   uint16_t rm_ds;                       /* segment for default reflection */
@@ -332,7 +334,12 @@ static void rm_int(struct frame *v, uint8_t vec, uint32_t flags)
 
   /* the monitor's own services (INT 2Fh AH=DEh, INT 15h AH=87h, ...) as
      for an INT instruction: then V86 only passes the return breakpoint */
-  if (v86_intercept(v, vec))
+  int done;
+
+  vm_hold = 1;                          /* `v` is not a live V86 frame */
+  done = v86_intercept(v, vec);
+  vm_hold = 0;
+  if (done)
   {
     v->cs = boot.stub_seg;
     v->eip = boot.stub_bp + BP_RM_RETURN;
@@ -454,7 +461,7 @@ static void client_enter(struct frame *v)
   struct frame p;
   int i;
 
-  if (cl.active)
+  if (cl.active)                        /* one client (maybe in another session) */
   {
     v->eip = ret_ip;
     v->cs = ret_cs;
@@ -466,6 +473,7 @@ static void client_enter(struct frame *v)
   tsp = 0;
   hstack_cur = HOST_STACK;
   cl.active = 1;
+  cl.session = vm_current();
   cl.bits32 = AX(v) & 1;
   cl.psp = *(uint16_t *)rm_ptr(boot.stub_seg, boot.stub_psp);
   cl.rm_ss = (uint16_t)v->es;           /* private data area */
@@ -501,7 +509,8 @@ static void client_enter(struct frame *v)
   p.pes = LSEL(i + 3);
   p.pfs = p.pgs = 0;
   p.eflags = pm_flags(v86_vflags(v)) & ~EFL_CF;
-  kprintf("dpmi: %u bit client, PSP %04x\n", cl.bits32 ? 32 : 16, cl.psp);
+  kprintf("dpmi: %u bit client, PSP %04x, session %d\n", cl.bits32 ? 32 : 16, cl.psp,
+          cl.session);
   enter_frame(&p);
 }
 
@@ -985,12 +994,18 @@ int dpmi_active(void)
   return cl.active;
 }
 
+/* the session the client runs in, -1 if there is none */
+int dpmi_owner(void)
+{
+  return cl.active ? cl.session : -1;
+}
+
 /* real mode INT 21h AH=4Ch while a client is active (e.g. via 0300h) */
 void dpmi_rm_exit(void)
 {
   int psp = dos_current_psp();
 
-  if (!cl.active || !tsp)
+  if (!cl.active || !tsp || cl.session != vm_current())
     return;
   if (psp >= 0 && psp != cl.psp)
     return;                             /* a program the client started */
@@ -1025,12 +1040,27 @@ int dpmi_irq_v86(struct frame *v, int irq)
 {
   uint8_t vec = irq < 8 ? 0x08 + irq : 0x70 + irq - 8;
 
-  if (!cl.active || !cl.pmint[vec].sel)
+  if (!cl.active || !cl.pmint[vec].sel || cl.session != vm_current())
     return 0;
   rm_ss_cur = (uint16_t)v->ss;
   rm_sp_cur = (uint16_t)(v->esp - 0x40);
   pm_handler(v, cl.pmint[vec], T_TO_PM_HANDLER, 0, v86_vflags(v));
   return 1;
+}
+
+/* hardware IRQ taken while the client runs in PM: the session scheduler
+   (timer) and the session hotkeys (keyboard) first, as in V86 */
+void dpmi_hwirq(struct frame *f, int irq)
+{
+  if (irq == 0 && !(vm1.pending & 1u))
+  {
+    vm1.pending |= 1u;                  /* another session gets this tick */
+    vm_tick(f);                         /* does not return if it switched */
+    vm1.pending &= ~1u;
+  }
+  else if (irq == 1 && vm_kbd(f))
+    enter_frame(f);                     /* a hotkey or another session's key */
+  dpmi_irq(f, irq);
 }
 
 /* hardware IRQ while the client runs */
@@ -1189,6 +1219,7 @@ void dpmi_trap(struct frame *f)
     if (code[len] == 0xf4)              /* HLT: wait for an interrupt */
     {
       f->eip += len + 1;
+      vm_yield(f);                      /* another session may run instead */
       while (!vm1.pending)
         __asm__ volatile("sti; hlt; cli" ::: "memory");
       dpmi_take_pending(f);
@@ -1196,7 +1227,7 @@ void dpmi_trap(struct frame *f)
     }
   }
   if (f->vector >= 0x20 && f->vector < 0x30)
-    return dpmi_irq(f, (int)f->vector - 0x20);
+    return dpmi_hwirq(f, (int)f->vector - 0x20);
   pm_exception(f);
 }
 

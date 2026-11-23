@@ -30,6 +30,7 @@ for p in netchk poweroff; do
 done
 /opt/djgpp/bin/i586-pc-msdosdjgpp-gcc -O2 -s -I/opt/watt32/inc -o "$WORK/nettest.exe" \
   "$HERE/nettest.c" -L/opt/watt32/lib -lwatt
+/opt/djgpp/bin/i586-pc-msdosdjgpp-gcc -O2 -s -o "$WORK/contest.exe" "$HERE/contest.c"
 
 cd "$WORK"
 printf 'DEVICE=A:\\HIMEMX.EXE\r\nDOS=HIGH\r\nSHELL=A:\\COMMAND.COM A:\\ /E:1024 /P\r\n' > fdconfig.sys
@@ -38,6 +39,9 @@ cat > autoexec.bat <<EOF
 SET WATTCP.CFG=A:\\
 A:\\MDVMM.COM
 IF ERRORLEVEL 1 GOTO END
+A:\\SSHSLOT.COM
+IF ERRORLEVEL 1 GOTO END
+A:\\CONTEST.EXE
 A:\\PKTDRV.COM
 IF ERRORLEVEL 1 GOTO END
 A:\\NETCHK.COM
@@ -66,6 +70,9 @@ mcopy -i disk.img "$ROOT/mdvmm/build/MDVMM.COM" ::MDVMM.COM
 mcopy -i disk.img "$ROOT/mdvmm/build/PKTDRV.COM" ::PKTDRV.COM
 mcopy -i disk.img netchk.com ::NETCHK.COM
 mcopy -i disk.img nettest.exe ::NETTEST.EXE
+mcopy -i disk.img contest.exe ::CONTEST.EXE
+mcopy -i disk.img "$ROOT/mdvmm/build/SSHSLOT.COM" ::SSHSLOT.COM
+mcopy -i disk.img /opt/cwsdpmi/bin/CWSDPMI.EXE ::CWSDPMI.EXE
 mcopy -i disk.img poweroff.com ::POWEROFF.COM
 
 # the UEFI boot: the same floppy as \MODERNDOS\BOOT.IMG on an ESP
@@ -107,10 +114,22 @@ fail=0
 run() {   # run name -- qemu args
   local name=$1; shift
   rm -f debug.log
+  if [ -n "$SHOTS" ]; then           # SHOTS=dir: screenshots every 5 s
+    mkdir -p "$SHOTS"
+    ( for i in $(seq 1 40); do sleep 5
+        python3 -c 'import socket,sys,time; s=socket.socket(socket.AF_UNIX); s.connect("mon.sock"); s.sendall(("screendump %s\n" % sys.argv[1]).encode()); time.sleep(0.5)' \
+          "$SHOTS/${name// /_}-$i.ppm" 2>/dev/null || true
+      done ) &
+  fi
   timeout --foreground 240 "$@" -m 128 -display none -no-reboot \
+    -monitor unix:mon.sock,server,nowait \
     -nic user,model=e1000 -debugcon file:debug.log </dev/null || true
+  [ -n "$SHOTS" ] && cp debug.log "$SHOTS/${name// /_}.log"
   echo "-- $name"
-  grep -a -E "nic:|e1000:|Packet driver|netchk:|NETTEST:|PANIC" debug.log | sed 's/\r$//'
+  grep -a -E "nic:|e1000:|Packet driver|netchk:|NETTEST:|CONTEST:|vm: |dpmi: |PANIC" debug.log | sed 's/\r$//'
+  if grep -aq "CONTEST: FAIL" debug.log || ! grep -aq "CONTEST: 0 failures" debug.log; then
+    echo "  FAIL $name: remote console (CONTEST)"; fail=1
+  else echo "  ok   $name: remote console (CONTEST)"; fi
   for marker in "nic: Intel e1000" "Packet driver at INT 60h" "netchk: ARP reply from 10.0.2.2" \
                 "NETTEST: my address 10.0.2.15" "NETTEST: connected to 10.0.2.2" \
                 "NETTEST: reply: hello from the host, you said: hello from modernDOS"; do

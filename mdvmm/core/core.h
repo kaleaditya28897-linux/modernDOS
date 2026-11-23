@@ -149,6 +149,10 @@ int dpmi_irq_v86(struct frame *v, int irq);
 int dpmi_take_pending(struct frame *pm);
 void dpmi_rm_exit(void);
 int dpmi_active(void);
+int dpmi_owner(void);
+void dpmi_hwirq(struct frame *f, int irq);
+int vm_current(void);
+extern int vm_hold;
 
 /* vm.c */
 #define VRAM_PAGES 8

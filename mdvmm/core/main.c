@@ -12,7 +12,7 @@ void trap_dispatch(struct frame *f)
   {
     dma_irq();                  /* bounced DMA data before any handler */
     if (user)
-      dpmi_irq(f, (int)f->vector - 0x20);
+      dpmi_hwirq(f, (int)f->vector - 0x20);
     else
       v86_irq(f, (int)f->vector - 0x20);
     return;

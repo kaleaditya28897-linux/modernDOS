@@ -29,7 +29,7 @@ CFLAGS64 = -m64 -std=gnu11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-builtin
           -fpie -fno-stack-protector -mno-red-zone -mgeneral-regs-only \
           -fno-asynchronous-unwind-tables -fshort-wchar -Iinclude -Iuefi
 
-all: $(B)/MDVMM.COM $(B)/BOOTX64.EFI $(B)/PKTDRV.COM
+all: $(B)/MDVMM.COM $(B)/BOOTX64.EFI $(B)/PKTDRV.COM $(B)/SSHSLOT.COM
 
 $(B):
 	mkdir -p $(B)
@@ -74,6 +74,9 @@ $(B)/BOOTX64.EFI: $(B)/uefi_main.o $(B)/uefi_hwinfo.o $(B)/uefi_start.o uefi/efi
 	  -T uefi/efi.ld -o $@ $(B)/uefi_main.o $(B)/uefi_hwinfo.o $(B)/uefi_start.o
 
 $(B)/PKTDRV.COM: pktdrv/pktdrv.asm | $(B)
+	$(NASM) -f bin -o $@ $<
+
+$(B)/SSHSLOT.COM: sshslot/sshslot.asm | $(B)
 	$(NASM) -f bin -o $@ $<
 
 clean:
