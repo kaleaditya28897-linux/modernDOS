@@ -39,7 +39,7 @@ struct ui {
   /* open menu */
   struct window *popup;
   struct widget *menubar;
-  int open, hot;
+  int open;
 };
 
 static int focusable(const struct widget *w)
@@ -277,43 +277,129 @@ void ui_redraw(struct ui *ui)
 }
 
 /* ---------------------------------------------------------------- */
-/* menus                                                            */
+/* popup menus                                                      */
 
-static void popup_draw(struct ui *ui)
+/* one popup menu at a time */
+static struct {
+  struct window *win;
+  const char *const *items;
+  int n, hot;
+  void (*choose)(int item, void *user);
+  void *user;
+} pm;
+
+static void pm_draw(void)
 {
-  const struct ui_menu *m = &ui->menubar->menus[ui->open];
-  struct surface *s = ui->popup->client;
+  struct surface *s = pm.win->client;
   int i;
 
   draw_fill(s, 0, 0, s->w, s->h, C_FIELD);
-  for (i = 0; i < m->nitems; i++)
+  for (i = 0; i < pm.n; i++)
   {
-    if (i == ui->hot)
+    if (i == pm.hot)
       draw_fill(s, 2, 2 + i * ROW_H, s->w - 4, ROW_H, C_ACCENT);
-    draw_text(s, 12, 2 + i * ROW_H + (ROW_H - FONT_H) / 2, m->items[i],
-              i == ui->hot ? C_ACCENT_TX : C_INK, TEXT_TRANSPARENT);
+    draw_text(s, 12, 2 + i * ROW_H + (ROW_H - FONT_H) / 2, pm.items[i],
+              i == pm.hot ? C_ACCENT_TX : C_INK, TEXT_TRANSPARENT);
   }
-  wm_invalidate(ui->popup);
+  wm_invalidate(pm.win);
 }
 
-static void menu_close(struct ui *ui)
+/* close the popup; tell the owner the item (-1: none) */
+static void pm_end(int item)
 {
-  if (ui->popup)
+  void (*choose)(int, void *) = pm.choose;
+  void *user = pm.user;
+  struct window *w = pm.win;
+
+  if (!w)
+    return;
+  pm.win = 0;
+  wm_window_close(w);
+  if (choose)
+    choose(item, user);
+}
+
+static int pm_handler(struct window *win, const struct event *e)
+{
+  int row;
+
+  switch (e->type)
   {
-    struct window *p = ui->popup;
-    ui->popup = 0;
-    wm_window_close(p);
+    case EV_CLOSE:
+      pm_end(-1);
+      return 1;
+    case EV_MOUSE_MOVE:
+    case EV_MOUSE_DOWN:
+      row = e->y >= 2 ? (e->y - 2) / ROW_H : -1;
+      if (row >= 0 && row < pm.n && e->x >= 0 && e->x < win->client->w && row != pm.hot)
+      {
+        pm.hot = row;
+        pm_draw();
+      }
+      return 1;
+    case EV_MOUSE_UP:
+      row = e->y >= 2 ? (e->y - 2) / ROW_H : -1;
+      if (row >= 0 && row < pm.n && e->x >= 0 && e->x < win->client->w)
+        pm_end(row);
+      return 1;
+    case EV_KEY:
+      if (e->scan == 0x48 && pm.hot > 0)                  /* up */
+        pm.hot--;
+      else if (e->scan == 0x50 && pm.hot < pm.n - 1)      /* down */
+        pm.hot++;
+      else if (e->ascii == 13)
+      {
+        pm_end(pm.hot);
+        return 1;
+      }
+      else if (e->ascii == 27)
+      {
+        pm_end(-1);
+        return 1;
+      }
+      pm_draw();
+      return 1;
   }
-  ui_redraw(ui);
+  return 0;
 }
 
-static void menu_choose(struct ui *ui, int item)
+int ui_popup(int x, int y, const char *const *items, int n, void (*choose)(int item, void *user),
+             void *user)
 {
+  int w = 0, j;
+
+  pm_end(-1);
+  for (j = 0; j < n; j++)
+    if (text_width(items[j]) > w)
+      w = text_width(items[j]);
+  pm.items = items;
+  pm.n = n;
+  pm.hot = 0;
+  pm.choose = choose;
+  pm.user = user;
+  pm.win = wm_popup_new(x, y, w + 40, n * ROW_H + 6);
+  if (!pm.win)
+    return -1;
+  pm.win->handler = pm_handler;
+  pm_draw();
+  return 0;
+}
+
+int ui_popup_open(void)
+{
+  return pm.win != 0;
+}
+
+/* the menu bar's menus */
+static void bar_choose(int item, void *user)
+{
+  struct ui *ui = user;
   struct widget *bar = ui->menubar;
   int menu = ui->open;
 
-  menu_close(ui);
-  if (item >= 0 && item < bar->menus[menu].nitems && bar->action)
+  ui->popup = 0;
+  ui_redraw(ui);
+  if (item >= 0 && bar->action)
   {
     bar->menu = menu;
     bar->value = item;
@@ -321,70 +407,16 @@ static void menu_choose(struct ui *ui, int item)
   }
 }
 
-static int popup_handler(struct window *win, const struct event *e)
-{
-  struct ui *ui = win->user;
-  int n = ui->menubar->menus[ui->open].nitems, row;
-
-  switch (e->type)
-  {
-    case EV_CLOSE:
-      menu_close(ui);
-      return 1;
-    case EV_MOUSE_MOVE:
-    case EV_MOUSE_DOWN:
-      row = e->y >= 2 ? (e->y - 2) / ROW_H : -1;
-      if (row >= 0 && row < n && e->x >= 0 && e->x < win->client->w && row != ui->hot)
-      {
-        ui->hot = row;
-        popup_draw(ui);
-      }
-      return 1;
-    case EV_MOUSE_UP:
-      row = e->y >= 2 ? (e->y - 2) / ROW_H : -1;
-      if (row >= 0 && row < n && e->x >= 0 && e->x < win->client->w)
-        menu_choose(ui, row);
-      return 1;
-    case EV_KEY:
-      if (e->scan == 0x48 && ui->hot > 0)                 /* up */
-        ui->hot--;
-      else if (e->scan == 0x50 && ui->hot < n - 1)        /* down */
-        ui->hot++;
-      else if (e->ascii == 13)
-      {
-        menu_choose(ui, ui->hot);
-        return 1;
-      }
-      else if (e->ascii == 27)
-      {
-        menu_close(ui);
-        return 1;
-      }
-      popup_draw(ui);
-      return 1;
-  }
-  return 0;
-}
-
 static void menu_open(struct ui *ui, int i)
 {
   const struct ui_menu *m = &ui->menubar->menus[i];
-  int w = 0, j, top = WM_TITLE_H;
 
-  if (ui->popup)
-    menu_close(ui);
-  for (j = 0; j < m->nitems; j++)
-    if (text_width(m->items[j]) > w)
-      w = text_width(m->items[j]);
   ui->open = i;
-  ui->hot = 0;
-  ui->popup = wm_popup_new(ui->win->x + WM_BORDER + menu_title_x(ui->menubar, i) - 6,
-                           ui->win->y + top + MENUBAR_H - 1, w + 40, m->nitems * ROW_H + 6);
-  if (!ui->popup)
+  ui->popup = 0;
+  if (ui_popup(ui->win->x + WM_BORDER + menu_title_x(ui->menubar, i) - 6,
+               ui->win->y + WM_TITLE_H + MENUBAR_H - 1, m->items, m->nitems, bar_choose, ui))
     return;
-  ui->popup->user = ui;
-  ui->popup->handler = popup_handler;
-  popup_draw(ui);
+  ui->popup = pm.win;
   ui_redraw(ui);
 }
 

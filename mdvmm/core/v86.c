@@ -248,6 +248,13 @@ static int intercept(struct frame *f, uint8_t vec)
   return 0;
 }
 
+/* the monitor's services for an interrupt that is not an INT instruction
+   in V86 mode (the DPMI host reflecting one from protected mode) */
+int v86_intercept(struct frame *f, uint8_t vec)
+{
+  return intercept(f, vec);
+}
+
 /* ---------------------------------------------------------------- */
 /* port I/O                                                         */
 

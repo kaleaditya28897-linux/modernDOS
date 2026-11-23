@@ -227,6 +227,29 @@ void gfx_close(void)
   row = 0;
 }
 
+/* text mode for a while, keeping the back buffer and the mapping */
+void gfx_suspend(void)
+{
+  __dpmi_regs r;
+
+  memset(&r, 0, sizeof(r));
+  r.x.ax = 0x0003;
+  __dpmi_int(0x10, &r);
+}
+
+int gfx_resume(void)
+{
+  __dpmi_regs r;
+
+  memset(&r, 0, sizeof(r));
+  r.x.ax = 0x4f02;
+  r.x.bx = (uint16_t)(mode.vbe_mode | 0x4000);
+  if (!vbe(&r))
+    return -1;
+  gfx_present_all();
+  return 0;
+}
+
 void gfx_present(int x, int y, int w, int h)
 {
   int j, i;

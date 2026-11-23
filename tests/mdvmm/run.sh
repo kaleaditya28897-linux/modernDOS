@@ -72,6 +72,8 @@ A:\WMTEST.EXE
 IF ERRORLEVEL 1 GOTO END
 A:\UITEST.EXE
 IF ERRORLEVEL 1 GOTO END
+A:\MDDESK.EXE /TEST
+IF ERRORLEVEL 1 GOTO END
 ECHO success>A:\RESULT.TXT
 :END
 A:\POWEROFF.COM
@@ -105,6 +107,7 @@ mcopy -i disk.img gfxtest.exe ::GFXTEST.EXE
 mcopy -i disk.img mousetest.exe ::MOUSETEST.EXE
 mcopy -i disk.img wmtest.exe ::WMTEST.EXE
 mcopy -i disk.img uitest.exe ::UITEST.EXE
+mcopy -i disk.img "$ROOT/gui/build/MDDESK.EXE" ::MDDESK.EXE
 mcopy -i disk.img /opt/fdos/bin/ctmouse.exe ::CTMOUSE.EXE
 mcopy -i disk.img bg.bat ::BG.BAT
 printf 'hello from linux\n' > linux.txt
@@ -148,11 +151,13 @@ mouse_drv=$!
 wm_drv=$!
 (cd "$ROOT/tests/gui" && PYTHONDONTWRITEBYTECODE=1 exec python3 uidrive.py "$WORK/debug.log" "$WORK/mon.sock" "$WORK/ui.ppm") &
 ui_drv=$!
+(cd "$ROOT/tests/gui" && PYTHONDONTWRITEBYTECODE=1 exec python3 deskdrive.py "$WORK/debug.log" "$WORK/mon.sock" "$WORK/desk.ppm") &
+desk_drv=$!
 timeout --foreground 300 "$QEMU" -m 64 \
   -drive file=disk.img,format=raw,if=floppy -display none \
   -debugcon file:debug.log -no-reboot \
   -monitor unix:mon.sock,server,nowait $QEMU_EXTRA </dev/null || true
-kill $shot_gfx $mouse_drv $wm_drv $ui_drv 2>/dev/null || true
+kill $shot_gfx $mouse_drv $wm_drv $ui_drv $desk_drv 2>/dev/null || true
 kill $keys_pid 2>/dev/null || true
 sed 's/\r$//' debug.log
 
@@ -176,6 +181,7 @@ python3 "$ROOT/tests/gui/gfxcheck.py" gfx.ppm debug.log || fail=1
 python3 "$ROOT/tests/gui/mousecheck.py" debug.log mouse.ppm loose || fail=1   # CTMOUSE accelerates
 python3 "$ROOT/tests/gui/wmcheck.py" debug.log wm.ppm || fail=1
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT/tests/gui/uicheck.py" debug.log ui.ppm || fail=1
+PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT/tests/gui/deskcheck.py" debug.log desk.ppm || fail=1
 [ -n "$SHOTS" ] && cp ./*.ppm "$SHOTS"/ 2>/dev/null || true    # keep the screenshots
 if [ $fail = 0 ]; then echo "MDVMM TEST: success"; else echo "MDVMM TEST: failure"; fi
 exit $fail

@@ -330,6 +330,16 @@ static void rm_int(struct frame *v, uint8_t vec, uint32_t flags)
 {
   const uint16_t *ivt = (const uint16_t *)(uint32_t)(vec * 4);
 
+  /* the monitor's own services (INT 2Fh AH=DEh, INT 15h AH=87h, ...) as
+     for an INT instruction: then V86 only passes the return breakpoint */
+  if (v86_intercept(v, vec))
+  {
+    v->cs = boot.stub_seg;
+    v->eip = boot.stub_bp + BP_RM_RETURN;
+    vm1.vif = 0;
+    return;
+  }
+
   v86_push16(v, (uint16_t)(flags | EFL_IF));
   v86_push16(v, boot.stub_seg);
   v86_push16(v, boot.stub_bp + BP_RM_RETURN);
@@ -978,8 +988,12 @@ int dpmi_active(void)
 /* real mode INT 21h AH=4Ch while a client is active (e.g. via 0300h) */
 void dpmi_rm_exit(void)
 {
+  int psp = dos_current_psp();
+
   if (!cl.active || !tsp)
     return;
+  if (psp >= 0 && psp != cl.psp)
+    return;                             /* a program the client started */
   kprintf("dpmi: client terminated from real mode\n");
   if (cl.env_sel)
     *(uint16_t *)rm_ptr(cl.psp, 0x2c) = cl.env_seg;

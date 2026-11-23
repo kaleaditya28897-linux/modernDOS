@@ -33,6 +33,32 @@ static struct rect dmg;
 static int dmg_set, quit;
 static struct window *drag, *capture;
 static int drag_dx, drag_dy;
+/* the desktop's own content (a panel): drawn over the background, gets
+   the mouse where no window is; windows stay below desk_top */
+static int desk_top;
+static void (*desk_draw)(struct surface *s);
+static int (*desk_event)(const struct event *e);
+
+void wm_desktop(int top, void (*draw)(struct surface *s), int (*event)(const struct event *e))
+{
+  struct surface *s = gfx_screen();
+
+  desk_top = top;
+  desk_draw = draw;
+  desk_event = event;
+  if (s)
+    wm_damage(0, 0, s->w, s->h);
+}
+
+int wm_desktop_top(void)
+{
+  return desk_top;
+}
+
+static int clamp_y(const struct window *w, int y)
+{
+  return !w->popup && y < desk_top ? desk_top : y;
+}
 
 int wm_count(void)
 {
@@ -112,6 +138,8 @@ static struct window *window_new(int x, int y, int w, int h, const char *title, 
   if (!win)
     return 0;
   win->popup = popup;
+  if (!popup && y < desk_top)
+    y = desk_top;
   win->x = x;
   win->y = y;
   win->w = w;
@@ -171,7 +199,7 @@ void wm_window_move(struct window *w, int x, int y)
 {
   damage_window(w);
   w->x = x;
-  w->y = y;
+  w->y = clamp_y(w, y);
   damage_window(w);
 }
 
@@ -197,6 +225,8 @@ static void draw_desktop(struct surface *s)
   draw_gradient(s, 0, 0, s->w, s->h, C_DESK_TOP, C_DESK_BOTTOM);
   draw_text(s, s->w - text_width("modernDOS") - 16, s->h - FONT_H - 12, "modernDOS",
             RGB(90, 110, 130), TEXT_TRANSPARENT);
+  if (desk_draw)
+    desk_draw(s);
 }
 
 static void close_box(const struct window *w, struct rect *r)
@@ -324,7 +354,7 @@ int wm_dispatch(const struct event *e)
         return 1;
       }
       if (!w)
-        return 0;
+        return desk_event ? desk_event(e) : 0;
       if (w->popup)
       {
         capture = w;
@@ -355,7 +385,10 @@ int wm_dispatch(const struct event *e)
         wm_window_move(drag, e->x - drag_dx, e->y - drag_dy);
         return 1;
       }
-      return deliver(capture ? capture : window_at(e->x, e->y), e);
+      w = capture ? capture : window_at(e->x, e->y);
+      if (!w)
+        return desk_event ? desk_event(e) : 0;
+      return deliver(w, e);
     case EV_MOUSE_UP:
       if (drag)
       {
@@ -365,8 +398,12 @@ int wm_dispatch(const struct event *e)
       w = capture ? capture : window_at(e->x, e->y);
       if (!e->buttons)
         capture = 0;
+      if (!w)
+        return desk_event ? desk_event(e) : 0;
       return deliver(w, e);
     case EV_KEY:
+      if (!wm_focus())
+        return desk_event ? desk_event(e) : 0;
       return deliver(wm_focus(), e);
   }
   return 0;

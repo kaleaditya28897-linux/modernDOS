@@ -31,12 +31,15 @@ at your own risk.
 
 At the DOS prompt
 -----------------
+  MDDESK         the desktop: launcher (About, Run a DOS program, Exit),
+                 window list, clock
   MDVMM          on UEFI: mouse driver and DOS sessions; on BIOS PCs:
                  start the virtual machine monitor (needs HIMEMX)
   MDVMM NEW      start another DOS session; Ctrl+Alt+F1..F4 switch
   GFXDEMO        draw a test picture in graphics mode for 3 seconds
 
-Not yet: the desktop GUI (milestone M4), USB hubs, networking.
+Not yet: desktop applications (milestone M5), starting 32-bit DPMI
+programs from the desktop, USB hubs, networking.
 
 Source: https://github.com/kaleaditya28897-linux/modernDOS (branch modern)
 License: GNU GPL v2 (see COPYING). FreeCOM and HIMEMX are from FreeDOS.

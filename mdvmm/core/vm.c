@@ -76,6 +76,16 @@ static uint32_t far_lin(uint32_t fp)
 }
 
 /* INT 2Fh AX=DE04h: the loader registers per session data (DS:DX) */
+static uint32_t indos_lin;              /* DOS InDOS flag: SDA + 1 */
+
+/* DOS's current PSP (SDA + 10h), or -1 if DOS has not told us where */
+int dos_current_psp(void)
+{
+  if (!indos_lin)
+    return -1;
+  return *(const uint16_t *)(indos_lin - 1 + 0x10);
+}
+
 static int vm_register(struct frame *f)
 {
   const uint8_t *r = rm_ptr(f->ds, DX(f));
@@ -85,6 +95,8 @@ static int vm_register(struct frame *f)
   uint16_t boundary = *(const uint16_t *)(r + 14);
   int guard;
 
+  if (!indos_lin && *(const uint32_t *)(r + 4))
+    indos_lin = far_lin(*(const uint32_t *)(r + 4));
   if (registered || !sis || (boundary & 0xff))
     return 0;
   add_range(0, 0x600);                  /* IVT, BIOS data, DOS 500h area */

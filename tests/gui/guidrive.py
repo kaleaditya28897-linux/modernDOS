@@ -53,7 +53,8 @@ class Mouse:
         self.button(False)
 
 
-KEYS = {" ": "spc", "\n": "ret", "\t": "tab", ".": "dot", ",": "comma", "-": "minus"}
+KEYS = {" ": "spc", "\n": "ret", "\t": "tab", ".": "dot", ",": "comma", "-": "minus",
+        ":": "shift-semicolon", "\\": "backslash"}
 
 
 def type_text(sock, s):

@@ -117,6 +117,11 @@ for the host (SI=80h from INT 2Fh AX=1687h). For returns to 16-bit client
 stacks the monitor uses the "espfix" technique, so ESP[31:16] does not leak
 the monitor's stack address.
 
+A DOS program a client starts (e.g. with `system()`) runs normally: its
+INT 21h AH=4Ch ends the client only if DOS's current PSP is the client's.
+Interrupts a client reflects to real mode also reach the monitor's own
+services (INT 2Fh AH=DEh, INT 15h AH=87h).
+
 Not yet: DPMI 1.0 functions, several clients at once (a DPMI program
 starting another one), virtual memory.
 

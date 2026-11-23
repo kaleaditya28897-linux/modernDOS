@@ -7,7 +7,7 @@
 #     an appended GPT partition (EFI system partition) holding
 #     \EFI\BOOT\BOOTX64.EFI and \MODERNDOS\BOOT.IMG
 #   - BIOS, from CD: El Torito floppy emulation of BOOT.IMG
-# BOOT.IMG is a 1.44 MB DOS floppy: kernel, FreeCOM, HIMEMX, CTMOUSE (BIOS
+# BOOT.IMG is a 1.44 MB DOS floppy: kernel, FreeCOM, HIMEMX, MDDESK, CTMOUSE (BIOS
 # boots; on UEFI boots MDVMM installs the virtual BIOS mouse driver), MDVMM,
 # demo.
 #
@@ -40,6 +40,7 @@ PROMPT \$P\$G
 PATH A:\\
 ECHO.
 ECHO modernDOS $VERSION - see A:\\README.TXT
+ECHO   MDDESK       the desktop
 ECHO   MDVMM NEW    another DOS session (Ctrl+Alt+F1..F4 switch)
 ECHO   GFXDEMO      graphics test picture (3 seconds)
 ECHO.
@@ -64,6 +65,7 @@ mcopy -i boot.img autoexec.bat ::AUTOEXEC.BAT
 mcopy -i boot.img readme.txt ::README.TXT
 mcopy -i boot.img "$ROOT/mdvmm/build/MDVMM.COM" ::MDVMM.COM
 mcopy -i boot.img gfxdemo.exe ::GFXDEMO.EXE
+mcopy -i boot.img "$ROOT/gui/build/MDDESK.EXE" ::MDDESK.EXE
 mcopy -i boot.img /opt/fdos/bin/ctmouse.exe ::CTMOUSE.EXE
 mdir -i boot.img ::
 

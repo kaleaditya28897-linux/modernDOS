@@ -42,6 +42,8 @@ const struct gfx_mode *gfx_mode(void);
 struct surface *gfx_screen(void);       /* the back buffer */
 void gfx_present(int x, int y, int w, int h);
 void gfx_present_all(void);
+void gfx_suspend(void);                 /* text mode for a while (run a DOS program) */
+int gfx_resume(void);                   /* the graphics mode again, screen redrawn */
 /* mouse cursor, drawn over the presented screen (not in the back buffer) */
 void gfx_cursor_show(int on);
 void gfx_cursor_move(int x, int y);
@@ -124,6 +126,11 @@ void wm_damage(int x, int y, int w, int h);
 void wm_update(void);                   /* repaint and present damage */
 int wm_dispatch(const struct event *e); /* route one event; 0 if unused */
 void wm_run(int (*idle)(void));         /* until wm_quit; idle may be 0 */
+/* the desktop's content: a band of `top` pixels windows stay below (a
+   panel), drawn by draw() after the background; event() gets the mouse
+   where there is no window, and keys when there is none */
+void wm_desktop(int top, void (*draw)(struct surface *s), int (*event)(const struct event *e));
+int wm_desktop_top(void);
 void wm_quit(void);
 
 /* ui.c - widgets in a window */
@@ -171,5 +178,9 @@ void ui_focus(struct widget *w);
 struct widget *ui_focused(struct ui *ui);
 void ui_redraw(struct ui *ui);
 int ui_widget_center(const struct widget *w, int *sx, int *sy);   /* screen */
+/* a popup menu at x,y (screen); choose gets the item or -1 (closed) */
+int ui_popup(int x, int y, const char *const *items, int n, void (*choose)(int item, void *user),
+             void *user);
+int ui_popup_open(void);
 
 #endif
