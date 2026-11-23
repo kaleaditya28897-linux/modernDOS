@@ -35,9 +35,15 @@ RUN mkdir -p /opt/fdos && cd /opt/fdos \
       curl -fsSL -o $p.zip https://www.ibiblio.org/pub/micro/pc-stuff/freedos/files/repositories/1.4/base/$p.zip \
       && unzip -q -o -LL $p.zip && rm $p.zip; done
 
-# UEFI firmware for the UEFI boot tests (x64 OVMF), xorriso for the release ISO
+# UEFI firmware for the UEFI boot tests (x64 OVMF), xorriso for the release
+# ISO; libfl2 for DJGPP's ar, libslang2-dev for building Watt-32's tools
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ovmf xorriso \
+ && apt-get install -y --no-install-recommends ovmf xorriso libfl2 libslang2-dev \
  && rm -rf /var/lib/apt/lists/*
+
+# Watt-32 TCP/IP for DJGPP -> /opt/watt32 (pinned, checked; see watt32.sh)
+COPY watt32.sh /tmp/watt32/
+COPY watt32/ /tmp/watt32/watt32/
+RUN bash /tmp/watt32/watt32.sh && rm -rf /tmp/watt32 /opt/watt32/bin
 
 WORKDIR /src

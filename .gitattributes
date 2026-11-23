@@ -14,3 +14,5 @@ release/*.sh text eol=lf
 tests/iso/*.sh text eol=lf
 gui/** text eol=lf
 tests/gui/*.py text eol=lf
+build/*.sh text eol=lf
+tests/net/*.sh text eol=lf
