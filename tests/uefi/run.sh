@@ -282,6 +282,14 @@ for marker in "modernDOS kernel" "Hello from DOS on UEFI" "UEFI BOOT: success" \
   if sed 's/\r//g' serial.log | grep -aq "$marker"; then echo "  ok   screen: $marker"; else
     echo "  FAIL screen missing: $marker"; fail=1; fi
 done
+# the loader's hardware report on the ESP
+mtype -i esp.img ::/MODERNDOS/HWINFO.TXT 2>/dev/null | tr -d '\r' > hwinfo.txt || true
+echo "-- HWINFO.TXT (start)"; head -12 hwinfo.txt
+for marker in "Firmware: " "System: " "CPU: " "GOP: mode" "PCI devices" "  00:00.0  8086:" "Usable memory: "; do
+  if grep -q "$marker" hwinfo.txt; then echo "  ok   hwinfo: $marker"; else
+    echo "  FAIL hwinfo missing: $marker"; fail=1; fi
+done
+
 # the hard disks, from Linux: check_disk image drive name
 check_disk() {
   dd if="$1" of=part.img bs=512 skip=2048 status=none

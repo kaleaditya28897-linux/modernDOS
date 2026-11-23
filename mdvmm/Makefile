@@ -66,9 +66,12 @@ $(B)/uefi_main.o: uefi/main.c uefi/efi.h include/bootinfo.h | $(B)
 $(B)/uefi_start.o: uefi/start.asm $(B)/core.bin
 	$(NASM) -I$(B)/ -f elf64 -o $@ $<
 
-$(B)/BOOTX64.EFI: $(B)/uefi_main.o $(B)/uefi_start.o uefi/efi.ld
+$(B)/uefi_hwinfo.o: uefi/hwinfo.c uefi/efi.h | $(B)
+	$(CC64) $(CFLAGS64) -c -o $@ $<
+
+$(B)/BOOTX64.EFI: $(B)/uefi_main.o $(B)/uefi_hwinfo.o $(B)/uefi_start.o uefi/efi.ld
 	$(LD64) -m i386pep --subsystem 10 --image-base 0x10000000 -e efi_main --enable-reloc-section -nostdlib \
-	  -T uefi/efi.ld -o $@ $(B)/uefi_main.o $(B)/uefi_start.o
+	  -T uefi/efi.ld -o $@ $(B)/uefi_main.o $(B)/uefi_hwinfo.o $(B)/uefi_start.o
 
 clean:
 	rm -rf $(B)

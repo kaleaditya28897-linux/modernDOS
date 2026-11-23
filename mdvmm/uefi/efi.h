@@ -102,16 +102,18 @@ typedef struct {
 } EFI_LOADED_IMAGE_PROTOCOL;
 
 /* files */
-#define EFI_FILE_MODE_READ 1ull
+#define EFI_FILE_MODE_READ   1ull
+#define EFI_FILE_MODE_WRITE  2ull
+#define EFI_FILE_MODE_CREATE 0x8000000000000000ull
 
 typedef struct EFI_FILE_PROTOCOL {
   uint64_t Revision;
   EFI_STATUS (EFIAPI *Open)(struct EFI_FILE_PROTOCOL *This, struct EFI_FILE_PROTOCOL **New,
                             CHAR16 *Name, uint64_t Mode, uint64_t Attributes);
   EFI_STATUS (EFIAPI *Close)(struct EFI_FILE_PROTOCOL *This);
-  void *Delete;
+  EFI_STATUS (EFIAPI *Delete)(struct EFI_FILE_PROTOCOL *This);
   EFI_STATUS (EFIAPI *Read)(struct EFI_FILE_PROTOCOL *This, UINTN *Size, void *Buffer);
-  void *Write;
+  EFI_STATUS (EFIAPI *Write)(struct EFI_FILE_PROTOCOL *This, UINTN *Size, void *Buffer);
   EFI_STATUS (EFIAPI *GetPosition)(struct EFI_FILE_PROTOCOL *This, uint64_t *Position);
   EFI_STATUS (EFIAPI *SetPosition)(struct EFI_FILE_PROTOCOL *This, uint64_t Position);
 } EFI_FILE_PROTOCOL;
@@ -147,5 +149,12 @@ typedef struct EFI_GRAPHICS_OUTPUT_PROTOCOL {
   void *Blt;
   EFI_GRAPHICS_OUTPUT_PROTOCOL_MODE *Mode;
 } EFI_GRAPHICS_OUTPUT_PROTOCOL;
+
+/* UGA (EFI 1.1 graphics, before GOP; older Apple firmware) */
+typedef struct EFI_UGA_DRAW_PROTOCOL {
+  EFI_STATUS (EFIAPI *GetMode)(struct EFI_UGA_DRAW_PROTOCOL *This, uint32_t *Width,
+                               uint32_t *Height, uint32_t *Depth, uint32_t *Refresh);
+  void *SetMode, *Blt;
+} EFI_UGA_DRAW_PROTOCOL;
 
 #endif

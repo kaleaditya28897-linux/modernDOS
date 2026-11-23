@@ -175,6 +175,13 @@ the core like the DOS loader does, with `boot_type = BOOT_UEFI` in
 It also allocates up to 64 MB of contiguous memory below 4 GB as DOS
 extended memory (`xms_phys`/`xms_size`, bootinfo version 4).
 
+Before anything else the loader writes a hardware report,
+`\MODERNDOS\HWINFO.TXT`, to the boot volume if it is writable (a USB
+stick, not a CD): firmware vendor and version, SMBIOS model, CPU, GOP
+modes and UGA, every PCI device with its BARs and IRQ line, the EFI
+configuration tables and the memory map (`uefi/hwinfo.c`). It is how
+drivers for a real machine are written without access to it.
+
 The core then sets up a PC (`bios.c`):
 
 - `rom.asm` at F000:0000 (RAM from the pool). BIOS services are HLT
@@ -208,7 +215,8 @@ The core then sets up a PC (`bios.c`):
   4 GB (64-bit BARs, the usual case for NVMe) get 4 MB pages with PSE-36,
   which puts physical address bits 32-39 in the page directory entry; the
   core keeps 32-bit paging.
-- INT 16h / IRQ1: PS/2 keyboard (scancode set 1), BIOS keyboard buffer,
+- INT 16h / IRQ1: PS/2 keyboard (scancode set 1; machines without a
+  keyboard controller, e.g. Macs, read FFh and are left alone), BIOS keyboard buffer,
   INT 15h AH=4Fh hook, Ctrl+Alt+Del reboots.
 - USB keyboards (`xhci.c`, `usbkbd.c`), like a BIOS's legacy USB
   support: each xHCI controller (class 0C:03:30) is taken from the

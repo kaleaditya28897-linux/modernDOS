@@ -21,6 +21,7 @@
 
 extern const uint8_t core_image[], core_image_end[];
 void enter_core(uint64_t low, uint64_t bootinfo, uint64_t pool) __attribute__((noreturn));
+int hwinfo_write(EFI_HANDLE image, EFI_SYSTEM_TABLE *st, EFI_FILE_PROTOCOL *root);
 
 static EFI_SYSTEM_TABLE *st;
 static EFI_BOOT_SERVICES *bs;
@@ -207,6 +208,23 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *systab)
   bs = st->BootServices;
   bs->SetWatchdogTimer(0, 0, 0, 0);
   print(u"MDVMM - modernDOS virtual machine monitor (UEFI)\r\n");
+
+  /* the hardware report, first: it is most useful when something fails */
+  {
+    EFI_LOADED_IMAGE_PROTOCOL *li;
+    EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *fs;
+    EFI_FILE_PROTOCOL *root;
+    if (!bs->HandleProtocol(image, &loaded_image_guid, (void **)&li) &&
+        !bs->HandleProtocol(li->DeviceHandle, &simple_fs_guid, (void **)&fs) &&
+        !fs->OpenVolume(fs, &root))
+    {
+      if (!hwinfo_write(image, st, root))
+        print(u"Hardware report written to \\MODERNDOS\\HWINFO.TXT\r\n");
+      else
+        print(u"Hardware report not written (read-only boot medium?)\r\n");
+      root->Close(root);
+    }
+  }
 
   if (load_file(image, BOOT_IMAGE, &rd_addr, &rd_size))
     return 1;

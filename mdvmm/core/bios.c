@@ -1279,8 +1279,9 @@ void bios_init(void)
   outb(0x40, 0);
   outb(0x21, 0xf8);
   outb(0xa1, 0xff);
-  while (inb(0x64) & 1)                 /* drain the keyboard controller */
-    inb(0x60);
+  for (i = 0; i < 32 && inb(0x64) != 0xff && (inb(0x64) & 1); i++)
+    inb(0x60);                          /* drain the keyboard controller (Macs
+                                           have none: the status reads FFh) */
 
   serial_init();
   disk_init();
