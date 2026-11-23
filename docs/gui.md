@@ -10,7 +10,7 @@ provides the graphics mode.
 | Part | State |
 |---|---|
 | M4.1 graphics foundation | working: VBE linear framebuffer (32 bpp) on both boot paths, `mdgui` library: back buffer, clipped drawing, 8x16 text, present |
-| M4.2 mouse and events | planned: INT 33h (virtual BIOS: USB mouse; DOS boots: CTMOUSE), event loop |
+| M4.2 mouse and events | working: INT 33h on both boot paths (UEFI: virtual BIOS driver, USB mice; DOS: CTMOUSE), `mdgui` events and mouse cursor |
 | M4.3 window system | planned: windows, z-order, moving, damage repaint |
 | M4.4 widget toolkit | planned: buttons, text fields, lists, menus, layout, theme |
 | M4.5 desktop shell | planned: launcher, clock, starting DOS programs |
@@ -45,6 +45,30 @@ it like a .o). API in `gui/lib/mdgui.h`:
 - `draw_text`: the 8x16 code page 437 font (shared with the MDVMM text
   console, `mdvmm/core/font.c`).
 
+## Input
+
+`input_open()` finds the INT 33h driver, sets its range to the screen,
+1:1 motion (function 0Fh, 8 mickeys per 8 pixels) and no double speed.
+`input_poll()` / `input_wait()` return events: mouse move, button down
+and up (from the press/release counters, functions 05h/06h, so short
+clicks between polls are not lost), and keys (INT 16h AH=10h/11h: scan
+code, character, shift flags). `input_wait()` idles with INT 2Fh
+AX=1680h, so other DOS sessions run.
+
+The mouse cursor is not in the back buffer: `gfx_cursor_move()` and
+`gfx_present()` compose it over the presented rows.
+
+Mouse drivers:
+
+- DOS boot: any INT 33h driver; the tests use CTMOUSE (FreeDOS) with the
+  PS/2 mouse. CTMOUSE accelerates fast motion.
+- UEFI boot: the virtual BIOS has a driver (`mdvmm/core/mouse.c`) fed by
+  USB boot protocol mice on xHCI root ports. DOS resets INT 33h while it
+  starts, so `MDVMM` (no arguments, in AUTOEXEC.BAT) installs it through
+  INT 2Fh AX=DE07h. In text mode the cursor is an inverted cell, drawn by
+  the console. Functions 00h-08h, 0Bh, 0Fh, 1Bh, 21h, 24h; not yet the
+  event handler (0Ch) or PS/2 mice.
+
 ## Testing
 
 `tests/gui/gfxtest.c` (GFXTEST) runs in the MDVMM test (DOS boot) and
@@ -53,3 +77,9 @@ returns to text mode after 3 seconds. `tests/gui/gfxshot.py` takes a
 QEMU screendump when the pattern is up, `tests/gui/gfxcheck.py` checks
 pixels: the corner boxes, the background, clipping, the gradient.
 `GFXSHOT=file.ppm` keeps the screenshot.
+
+`tests/gui/mousetest.c` (MOUSETEST) shows the cursor and logs clicks;
+`tests/gui/mousedrive.py` moves the mouse by (+120, +60) through the QEMU
+monitor, clicks, takes a screenshot and presses q; `mousecheck.py`
+checks the click position (exact with the virtual BIOS driver, direction
+only with CTMOUSE), the orange square and the cursor in the screenshot.

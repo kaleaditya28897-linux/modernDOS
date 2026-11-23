@@ -36,6 +36,7 @@ DJGPP=/opt/djgpp/bin/i586-pc-msdosdjgpp-gcc
 "$DJGPP" -O2 -o "$WORK/djtest.exe" "$ROOT/tests/lfn/djtest.c"
 "$DJGPP" -O2 -o "$WORK/dpmitest.exe" "$HERE/dpmitest.c"
 "$DJGPP" -O2 -I"$ROOT/gui/lib" -o "$WORK/gfxtest.exe" "$ROOT/tests/gui/gfxtest.c" "$ROOT/gui/build/mdgui.o"
+"$DJGPP" -O2 -I"$ROOT/gui/lib" -o "$WORK/mousetest.exe" "$ROOT/tests/gui/mousetest.c" "$ROOT/gui/build/mdgui.o"
 
 echo "== building boot floppy"
 cd "$WORK"
@@ -44,6 +45,7 @@ printf 'DEVICE=A:\\HIMEMX.EXE\r\nDOS=HIGH\r\nSHELL=A:\\COMMAND.COM A:\\ /E:512 /
 cat > autoexec.bat <<'EOF'
 @ECHO OFF
 ECHO failure>A:\RESULT.TXT
+A:\CTMOUSE.EXE
 A:\MDVMM.COM
 IF ERRORLEVEL 1 GOTO END
 A:\V86CHK.COM
@@ -61,6 +63,8 @@ IF ERRORLEVEL 1 GOTO END
 A:\SESSTEST.EXE /FG
 IF ERRORLEVEL 1 GOTO END
 A:\GFXTEST.EXE
+IF ERRORLEVEL 1 GOTO END
+A:\MOUSETEST.EXE
 IF ERRORLEVEL 1 GOTO END
 ECHO success>A:\RESULT.TXT
 :END
@@ -92,6 +96,8 @@ mcopy -i disk.img djtest.exe ::DJTEST.EXE        # note: no CWSDPMI on this disk
 mcopy -i disk.img dpmitest.exe ::DPMITEST.EXE
 mcopy -i disk.img sesstest.exe ::SESSTEST.EXE
 mcopy -i disk.img gfxtest.exe ::GFXTEST.EXE
+mcopy -i disk.img mousetest.exe ::MOUSETEST.EXE
+mcopy -i disk.img /opt/fdos/bin/ctmouse.exe ::CTMOUSE.EXE
 mcopy -i disk.img bg.bat ::BG.BAT
 printf 'hello from linux\n' > linux.txt
 mcopy -i disk.img linux.txt "::Created On Linux.txt"
@@ -103,17 +109,17 @@ python3 - "$WORK" <<'PY' &
 import os, socket, sys, time
 work = sys.argv[1]
 log, sock = os.path.join(work, "debug.log"), os.path.join(work, "mon.sock")
-deadline = time.time() + 170
-while time.time() < deadline:
+def text():
     try:
-        if b"sessions test" in open(log, "rb").read():
-            break
+        return open(log, "rb").read()
     except OSError:
-        pass
+        return b""
+deadline = time.time() + 290
+while time.time() < deadline and b"sessions test" not in text():
     time.sleep(0.2)
 keys = ["ctrl-alt-f2", "ctrl-alt-f1"]
 i = 0
-while time.time() < deadline:
+while time.time() < deadline and b"SESSIONS:" not in text():
     try:
         s = socket.socket(socket.AF_UNIX)
         s.connect(sock)
@@ -128,11 +134,13 @@ PY
 keys_pid=$!
 python3 "$ROOT/tests/gui/gfxshot.py" debug.log mon.sock gfx.ppm &
 shot_gfx=$!
-timeout --foreground 180 "$QEMU" -m 64 \
+python3 "$ROOT/tests/gui/mousedrive.py" debug.log mon.sock mouse.ppm &
+mouse_drv=$!
+timeout --foreground 300 "$QEMU" -m 64 \
   -drive file=disk.img,format=raw,if=floppy -display none \
   -debugcon file:debug.log -no-reboot \
   -monitor unix:mon.sock,server,nowait $QEMU_EXTRA </dev/null || true
-kill $shot_gfx 2>/dev/null || true
+kill $shot_gfx $mouse_drv 2>/dev/null || true
 kill $keys_pid 2>/dev/null || true
 sed 's/\r$//' debug.log
 
@@ -153,6 +161,7 @@ if fsck.fat -n disk.img >/dev/null; then echo "  ok   file system clean"; else
   echo "  FAIL fsck.fat"; fail=1; fi
 
 python3 "$ROOT/tests/gui/gfxcheck.py" gfx.ppm debug.log || fail=1
+python3 "$ROOT/tests/gui/mousecheck.py" debug.log mouse.ppm loose || fail=1   # CTMOUSE accelerates
 [ -n "$GFXSHOT" ] && cp gfx.ppm "$GFXSHOT" 2>/dev/null || true
 if [ $fail = 0 ]; then echo "MDVMM TEST: success"; else echo "MDVMM TEST: failure"; fi
 exit $fail

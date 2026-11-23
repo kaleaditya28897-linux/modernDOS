@@ -18,6 +18,7 @@ static uint32_t palette[16];
 static uint16_t shadow[COLS * ROWS];
 static int cur_cell = -1, blink;
 static int suspended;                   /* a program owns the framebuffer */
+static int mouse_cell = -1;             /* where the mouse cursor was drawn */
 static uint32_t ticks;
 
 static const uint8_t cga[16][3] = {
@@ -85,13 +86,20 @@ void fbcon_graphics(int on)
     for (i = 0; i < COLS * ROWS; i++)
       shadow[i] = 0xffff;               /* redraw everything */
     cur_cell = -1;
+    mouse_cell = -1;
   }
 }
 
-static void draw_cell(int n, uint16_t v, int cursor)
+static void draw_cell(int n, uint16_t v, int cursor, int invert)
 {
   const uint8_t *glyph = font8x16 + (v & 0xff) * 16;
   uint32_t fg = palette[(v >> 8) & 15], bg = palette[(v >> 12) & 7];
+
+  if (invert)                           /* the mouse cursor */
+  {
+    fg = palette[((v >> 12) & 7) ^ 15];
+    bg = palette[((v >> 8) & 7) ^ 7];
+  }
   uint32_t x = x0 + (uint32_t)(n % COLS) * 8 * scale;
   uint32_t y = y0 + (uint32_t)(n / COLS) * 16 * scale;
   uint16_t shape = *(uint16_t *)rm_ptr(0x40, 0x60);
@@ -124,7 +132,7 @@ void fbcon_update(void)
 {
   const uint16_t *page;
   uint16_t pos;
-  int n, c;
+  int n, c, mc;
   uint8_t active;
 
   if (!fb || suspended)
@@ -138,14 +146,17 @@ void fbcon_update(void)
   if (++ticks % 4 == 0)
     blink = !blink;
 
+  mc = mouse_text_cell();
   for (n = 0; n < COLS * ROWS; n++)
   {
     int cursor = n == c && blink;
-    if (page[n] != shadow[n] || n == cur_cell || n == c)
+    if (page[n] != shadow[n] || n == cur_cell || n == c ||
+        (mc != mouse_cell && (n == mc || n == mouse_cell)))
     {
-      draw_cell(n, page[n], cursor);
+      draw_cell(n, page[n], cursor, n == mc);
       shadow[n] = page[n];
     }
   }
+  mouse_cell = mc;
   cur_cell = c;
 }

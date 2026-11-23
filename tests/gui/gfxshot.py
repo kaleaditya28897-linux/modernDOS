@@ -12,7 +12,7 @@ import time
 
 def main():
     log, sock, out = sys.argv[1:4]
-    deadline = time.time() + (float(sys.argv[4]) if len(sys.argv) > 4 else 170)
+    deadline = time.time() + (float(sys.argv[4]) if len(sys.argv) > 4 else 290)
     while time.time() < deadline:
         try:
             if b"GFXTEST: drawn" in open(log, "rb").read():

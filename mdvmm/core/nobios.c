@@ -20,3 +20,8 @@ uint32_t ext_phys(uint32_t a)
 {
   return a;                             /* DOS boot: extended memory is physical */
 }
+
+int bios_mouse_install(void)
+{
+  return 0;                             /* DOS boot: load a mouse driver */
+}

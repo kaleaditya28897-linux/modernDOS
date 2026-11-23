@@ -21,7 +21,7 @@ B       = build
 COBJS   = $(B)/entry.o $(B)/main.o $(B)/lib.o $(B)/mm.o $(B)/cpu.o $(B)/v86.o $(B)/dpmi.o \
           $(B)/vm.o $(B)/dma.o
 UEFIOBJS = $(B)/bios.o $(B)/fbcon.o $(B)/font.o $(B)/romimg.o $(B)/pci.o $(B)/ahci.o $(B)/nvme.o \
-          $(B)/xhci.o $(B)/usbkbd.o
+          $(B)/xhci.o $(B)/usbkbd.o $(B)/mouse.o
 DOSOBJS = $(B)/nobios.o
 HDRS    = core/core.h include/bootinfo.h
 

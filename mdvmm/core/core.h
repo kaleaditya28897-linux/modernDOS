@@ -166,6 +166,7 @@ void vm_crit(struct frame *f);
 #define ROM_SEG 0xF000
 void bios_init(void);
 int bios_bp(struct frame *f, uint16_t ip);
+int bios_mouse_install(void);
 void fbcon_init(void);
 void fbcon_update(void);
 void fbcon_graphics(int on);
@@ -204,6 +205,11 @@ void xhci_init(void);
 void xhci_poll(void);
 void usbkbd_report(const uint8_t *report);
 void usbkbd_tick(void);
+
+/* mouse.c: INT 33h on UEFI boots */
+void mouse_input(int buttons, int dx, int dy);
+int mouse_text_cell(void);
+void int33(struct frame *f);
 
 /* dma.c */
 void dma_init(void);

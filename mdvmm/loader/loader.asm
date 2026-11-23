@@ -280,7 +280,15 @@ command:
         call    skip_spaces
         cmp     byte [si], 13
         jne     .new
-        ; no arguments: set up DOS sessions if nobody did (UEFI boot)
+        ; no arguments (UEFI boot): the virtual BIOS mouse driver, and
+        ; DOS sessions if nobody set them up
+        mov     ax, (MDVMM_MPX << 8) | 07h
+        int     2fh
+        cmp     ax, 1
+        jne     .no_mouse
+        mov     dx, msg_mouse
+        call    print
+.no_mouse:
         mov     ax, (MDVMM_MPX << 8) | 06h
         int     2fh
         test    dx, dx
@@ -462,6 +470,7 @@ msg_banner  db  'MDVMM - modernDOS virtual machine monitor', 13, 10, '$'
 msg_switch  db  'Starting monitor...', 13, 10, '$'
 msg_sessions db 'Monitor active (UEFI boot): setting up DOS sessions.', 13, 10, '$'
 msg_already db  'MDVMM is already active.', 13, 10, '$'
+msg_mouse   db  'Mouse driver (INT 33h) installed.', 13, 10, '$'
 msg_active  db  'MDVMM active: DOS is running in a virtual machine.', 13, 10, '$'
 msg_386     db  'MDVMM needs a 386 or later CPU.', 13, 10, '$'
 msg_pm      db  'CPU already in protected/V86 mode (MDVMM, EMM386 or a', 13, 10

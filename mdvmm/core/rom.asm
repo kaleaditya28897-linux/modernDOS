@@ -27,6 +27,7 @@ table:
         dw      dpt, config_table, stub_bp, stub_entry, stub_psp, stub_retf
         dw      irq0, irq1, irq_master, irq_slave, dummy_iret
         dw      vbe_oem, vbe_vendor, vbe_product, vbe_rev, vbe_modes
+        dw      int33
 table_end:
 
 ; ---- BIOS services: HLT (to the monitor), then RETF 2 ----
@@ -51,6 +52,8 @@ int18:  hlt
 int19:  hlt
         retf    2
 int1a:  hlt
+        retf    2
+int33:  hlt                             ; mouse driver
         retf    2
 
 ; INT 16h read with an empty buffer: the monitor continues here

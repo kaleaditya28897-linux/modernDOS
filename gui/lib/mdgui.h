@@ -42,6 +42,9 @@ const struct gfx_mode *gfx_mode(void);
 struct surface *gfx_screen(void);       /* the back buffer */
 void gfx_present(int x, int y, int w, int h);
 void gfx_present_all(void);
+/* mouse cursor, drawn over the presented screen (not in the back buffer) */
+void gfx_cursor_show(int on);
+void gfx_cursor_move(int x, int y);
 
 /* draw.c - drawing on surfaces (clipped) */
 struct surface *surface_new(int w, int h);
@@ -64,5 +67,25 @@ void draw_blit(struct surface *dst, int dx, int dy, const struct surface *src,
 #define TEXT_TRANSPARENT 0xff000000u    /* as bg: leave the background */
 int draw_text(struct surface *s, int x, int y, const char *text, color_t fg, color_t bg);
 int text_width(const char *text);
+
+/* input.c - keyboard (INT 16h) and mouse (INT 33h) events */
+enum { EV_NONE, EV_MOUSE_MOVE, EV_MOUSE_DOWN, EV_MOUSE_UP, EV_KEY };
+#define MB_LEFT   1
+#define MB_RIGHT  2
+#define MB_MIDDLE 4
+
+struct event {
+  int type;
+  int x, y;                             /* mouse position (all events) */
+  int buttons;                          /* buttons held (MB_*) */
+  int button;                           /* EV_MOUSE_DOWN/UP: which one */
+  int scan, ascii;                      /* EV_KEY: BIOS scan code, character */
+  int shift;                            /* EV_KEY: BIOS shift flags */
+};
+
+int input_open(void);                   /* 1 if there is a mouse */
+int input_poll(struct event *e);        /* 1 if *e is an event */
+void input_wait(struct event *e);       /* until there is one; idles */
+void input_close(void);
 
 #endif

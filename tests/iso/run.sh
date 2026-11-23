@@ -47,7 +47,7 @@ PY
   done
 }
 
-UEFI_MARKERS="MDVMM core:|bios: disk image|v86: entering VM1|vm: sessions enabled|bios: hard disks are read-only"
+UEFI_MARKERS="MDVMM core:|bios: disk image|v86: entering VM1|vm: sessions enabled|bios: hard disks are read-only|bios: mouse driver installed"
 SATA="-device ahci,id=ahci -drive id=hd,file=hd.img,format=raw,if=none -device ide-hd,drive=hd,bus=ahci.0"
 
 echo "== UEFI, CD"

@@ -29,9 +29,9 @@ RUN mkdir -p /opt/cwsdpmi && cd /opt/cwsdpmi \
  && curl -fsSL -o csdpmi7b.zip https://www.delorie.com/pub/djgpp/current/v2misc/csdpmi7b.zip \
  && unzip -q csdpmi7b.zip && rm csdpmi7b.zip
 
-# FreeDOS 1.4 FreeCOM shell and HIMEMX XMS driver for MDVMM tests -> /opt/fdos
+# FreeDOS 1.4 FreeCOM shell, HIMEMX XMS driver, CTMOUSE mouse driver -> /opt/fdos
 RUN mkdir -p /opt/fdos && cd /opt/fdos \
- && for p in freecom himemx; do \
+ && for p in freecom himemx ctmouse; do \
       curl -fsSL -o $p.zip https://www.ibiblio.org/pub/micro/pc-stuff/freedos/files/repositories/1.4/base/$p.zip \
       && unzip -q -o -LL $p.zip && rm $p.zip; done
 

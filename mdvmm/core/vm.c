@@ -492,7 +492,7 @@ static void vm_end(struct frame *f)
   switch_to(f, 0, 0);
 }
 
-/* INT 2Fh AH=DEh, AL=02h..06h; returns 1 if handled */
+/* INT 2Fh AH=DEh, AL=02h..07h; returns 1 if handled */
 int vm_api(struct frame *f)
 {
   switch (AL(f))
@@ -523,6 +523,9 @@ int vm_api(struct frame *f)
     case 0x05:                          /* set focus: BL = session */
       set_focus(BL(f));
       AX(f) = (uint16_t)focus;
+      return 1;
+    case 0x07:                          /* install the virtual BIOS mouse driver */
+      AX(f) = (uint16_t)bios_mouse_install();
       return 1;
     case 0x06:                          /* AX = running, BX = focus, CX = count,
                                            DX = 1 if sessions are set up */

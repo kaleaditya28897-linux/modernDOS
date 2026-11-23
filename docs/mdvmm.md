@@ -83,6 +83,7 @@ Intercepted services:
 | INT 2Fh AX=DE04h | loader registers the per-session DOS data (internal) |
 | INT 2Fh AX=DE05h | set focus: BL=session |
 | INT 2Fh AX=DE06h | AX=running session, BX=focused session, CX=number of sessions, DX=1 if sessions are set up |
+| INT 2Fh AX=DE07h | UEFI boots: install the virtual BIOS mouse driver as INT 33h; AX=1 if installed |
 | ports 00-0F, C0-DF, 81-8F | ISA DMA controllers, virtualized (see below) |
 
 The monitor logs to I/O port E9h (QEMU `-debugcon`, Bochs).
@@ -214,6 +215,9 @@ The core then sets up a PC (`bios.c`):
   port 60h (`vm_key`), so INT 09h hooks see them as PS/2 keys and the
   session hotkeys work. The last key held repeats after 500 ms, about
   9 per second. Not yet: hubs, hotplug, keyboard LEDs.
+- USB mice (HID boot protocol) feed an INT 33h mouse driver
+  (`mouse.c`); `MDVMM` installs it after DOS has started (DOS resets
+  INT 33h). See `docs/gui.md`.
 - Extended memory: DOS sees the loader's region at 1 MB, through INT 15h
   E820h, E801h and 88h, so any XMS driver works (HIMEMX, `DOS=HIGH`).
   The HMA (linear 100000h-10FFFFh) is mapped to its first 64 KB. INT 15h

@@ -7,7 +7,7 @@ CC      = $(DJGPP)gcc
 CFLAGS  = -O2 -Wall -Wextra -Werror -Ilib
 
 B       = build
-OBJS    = $(B)/gfx.o $(B)/draw.o $(B)/text.o $(B)/font.o
+OBJS    = $(B)/gfx.o $(B)/draw.o $(B)/text.o $(B)/input.o $(B)/font.o
 
 all: $(B)/mdgui.o
 

@@ -36,6 +36,17 @@ static uint32_t pitch;                  /* bytes */
 static int r_pos, g_pos, b_pos;
 static uint32_t *row;                   /* conversion buffer, one line */
 static char error[96];
+
+/* mouse cursor: arrow sprite, '#' outline, 'o' fill */
+#define CUR_W 11
+#define CUR_H 17
+static const char *const cursor_shape[CUR_H] = {
+  "#          ", "##         ", "#o#        ", "#oo#       ", "#ooo#      ",
+  "#oooo#     ", "#ooooo#    ", "#oooooo#   ", "#ooooooo#  ", "#oooooooo# ",
+  "#ooooooooo#", "#oooooo####", "#ooo#oo#   ", "#oo# #oo#  ", "#o#  #oo#  ",
+  "##    #oo# ", "      ###  ",
+};
+static int cur_on, cur_x, cur_y;
 static __dpmi_meminfo map;
 
 const char *gfx_error(void)
@@ -211,6 +222,7 @@ void gfx_close(void)
   map.address = 0;
   surface_free(screen);
   screen = 0;
+  cur_on = 0;
   free(row);
   row = 0;
 }
@@ -230,16 +242,47 @@ void gfx_present(int x, int y, int w, int h)
   for (j = y; j < y + h; j++)
   {
     const color_t *src = screen->px + j * screen->stride + x;
-    if (r_pos == 16 && g_pos == 8 && b_pos == 0)
-      movedata(_my_ds(), (unsigned)src, sel, j * pitch + x * 4, w * 4);
-    else
+    int cy = j - cur_y;
+    int on_cursor = cur_on && cy >= 0 && cy < CUR_H && cur_x < x + w && cur_x + CUR_W > x;
+
+    if (r_pos == 16 && g_pos == 8 && b_pos == 0 && !on_cursor)
     {
-      for (i = 0; i < w; i++)
-        row[i] = (src[i] >> 16 & 0xff) << r_pos | (src[i] >> 8 & 0xff) << g_pos |
-                 (src[i] & 0xff) << b_pos;
-      movedata(_my_ds(), (unsigned)row, sel, j * pitch + x * 4, w * 4);
+      movedata(_my_ds(), (unsigned)src, sel, j * pitch + x * 4, w * 4);
+      continue;
     }
+    memcpy(row, src, w * 4);
+    if (on_cursor)                      /* the cursor goes over the screen */
+      for (i = 0; i < CUR_W; i++)
+      {
+        int px = cur_x + i - x;
+        char c = cursor_shape[cy][i];
+        if (px >= 0 && px < w && c != ' ')
+          row[px] = c == '#' ? RGB(16, 16, 16) : RGB(255, 255, 255);
+      }
+    if (!(r_pos == 16 && g_pos == 8 && b_pos == 0))
+      for (i = 0; i < w; i++)
+        row[i] = (row[i] >> 16 & 0xff) << r_pos | (row[i] >> 8 & 0xff) << g_pos |
+                 (row[i] & 0xff) << b_pos;
+    movedata(_my_ds(), (unsigned)row, sel, j * pitch + x * 4, w * 4);
   }
+}
+
+void gfx_cursor_show(int on)
+{
+  cur_on = on;
+  gfx_present(cur_x, cur_y, CUR_W, CUR_H);
+}
+
+void gfx_cursor_move(int x, int y)
+{
+  int ox = cur_x, oy = cur_y;
+
+  if (x == cur_x && y == cur_y)
+    return;
+  cur_x = x;
+  cur_y = y;
+  gfx_present(ox, oy, CUR_W, CUR_H);    /* uncover the old place */
+  gfx_present(x, y, CUR_W, CUR_H);
 }
 
 void gfx_present_all(void)

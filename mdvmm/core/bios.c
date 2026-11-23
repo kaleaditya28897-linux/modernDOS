@@ -28,6 +28,7 @@ enum rom_id {
   R_DPT, R_CONFIG, R_STUB_BP, R_STUB_ENTRY, R_STUB_PSP, R_STUB_RETF,
   R_IRQ0, R_IRQ1, R_IRQ_MASTER, R_IRQ_SLAVE, R_IRET,
   R_VBE_OEM, R_VBE_VENDOR, R_VBE_PRODUCT, R_VBE_REV, R_VBE_MODES,
+  R_INT33,
   R_COUNT
 };
 
@@ -1109,6 +1110,18 @@ static void int15(struct frame *f)
   set_flag(f, EFL_CF, 1);
 }
 
+/* INT 2Fh AX=DE07h: install the mouse driver (INT 33h). DOS resets
+   INT 23h-3Fh while it starts, so this is done afterwards, like loading
+   a mouse driver (MDVMM.COM calls it). AX = 1 if installed. */
+int bios_mouse_install(void)
+{
+  if (!active)
+    return 0;
+  set_vec(0x33, ROM_SEG, rom[R_INT33]);
+  kprintf("bios: mouse driver installed (INT 33h)\n");
+  return 1;
+}
+
 /* HLT in the ROM: returns 1 if it was a BIOS breakpoint */
 int bios_bp(struct frame *f, uint16_t ip)
 {
@@ -1117,6 +1130,13 @@ int bios_bp(struct frame *f, uint16_t ip)
 
   if (!active || f->cs != ROM_SEG)
     return 0;
+  if (ip == rom[R_INT33])
+  {
+    int33(f);
+    id = R_INT33;
+    f->eip++;                           /* continue at RETF 2 */
+    goto done;
+  }
   for (id = 0; id <= R_IRQ1_BP && rom[id] != ip; id++)
     ;
   if (id > R_IRQ1_BP)

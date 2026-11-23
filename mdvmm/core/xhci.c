@@ -2,9 +2,9 @@
  *
  * Takes each xHCI controller from the firmware (legacy support handoff),
  * resets it and sets up the command ring, one event ring and the device
- * context array. Every device on a root port is addressed; the first
- * keyboard interface (HID boot protocol) of each is configured and gets
- * a ring of interrupt IN transfers. Reports go to usbkbd.c.
+ * context array. Every device on a root port is addressed; up to two HID
+ * boot interfaces of each (keyboard, mouse) are configured and get a ring
+ * of interrupt IN transfers. Reports go to usbkbd.c and mouse.c.
  *
  * No interrupts: the event ring is polled on every timer tick and from
  * INT 16h. Not yet: devices behind hubs, hotplug after boot, keyboard
@@ -13,9 +13,10 @@
 #include "core.h"
 
 #define MAX_HC       4
-#define MAX_KBD      4
+#define MAX_KBD      8                  /* HID interfaces, all devices */
 #define MAX_SLOTS    16
 #define NBUF         8                  /* queued report transfers */
+#define MAX_IF       2                  /* HID interfaces used per device */
 
 /* capability registers */
 #define CAP_LENGTH   0x00
@@ -65,9 +66,10 @@ struct ring {
   uint32_t idx, cycle;
 };
 
-struct kbd {
+struct kbd {                            /* a HID boot interface */
   struct hc *hc;
   int slot, dci;
+  int mouse;                            /* else a keyboard */
   struct ring ring;
   uint32_t bufs;                        /* page: NBUF reports, 64 bytes apart */
   uint32_t next;                        /* buffer of the next completion */
@@ -162,7 +164,13 @@ static void kbd_complete(struct kbd *k, uint32_t cc)
   uint32_t buf = k->bufs + (k->next % NBUF) * 64;
 
   if (cc == CC_SUCCESS || cc == CC_SHORT)
-    usbkbd_report(pool_ptr(buf));
+  {
+    const uint8_t *r = pool_ptr(buf);
+    if (k->mouse)
+      mouse_input(r[0] & 7, (int8_t)r[1], (int8_t)r[2]);
+    else
+      usbkbd_report(r);
+  }
   /* give the buffer back */
   ring_push(&k->ring, buf, 0, 8, TRB_NORMAL << 10 | 1 << 5 | 1 << 2);   /* IOC ISP */
   k->next++;
@@ -292,7 +300,8 @@ static void port_device(struct hc *h, uint32_t port)
   struct kbd *k;
   uint8_t *b;
   uint32_t *c;
-  int slot, cc, ifnum = -1, epaddr = 0, epmps = 8, binterval = 10, off, total, iface_kbd = 0;
+  struct { int ifnum, mouse, ep, mps, interval; } ifs[MAX_IF];
+  int slot, cc, off, total, nif = 0, cur = -1, i, n, maxdci;
 
   if (!(ps & PORT_CCS))
     return;
@@ -354,7 +363,7 @@ static void port_device(struct hc *h, uint32_t port)
     command(h, in, TRB_EVALUATE << 10 | (uint32_t)slot << 24);
   }
 
-  /* configuration descriptor: find a boot keyboard interface */
+  /* configuration descriptor: HID boot interfaces (keyboard, mouse) */
   if (control(h, &ep0, slot, 0x80, 6, 0x0200, 0, 9, buf))
     return;
   total = b[2] | b[3] << 8;
@@ -367,59 +376,79 @@ static void port_device(struct hc *h, uint32_t port)
   {
     if (b[off + 1] == 4)                /* interface */
     {
-      if (epaddr)
-        break;
-      iface_kbd = b[off + 5] == 3 && b[off + 6] == 1 && b[off + 7] == 1;
-      if (iface_kbd)
-        ifnum = b[off + 2];
+      cur = -1;
+      if (nif < MAX_IF && b[off + 5] == 3 && b[off + 6] == 1 &&
+          (b[off + 7] == 1 || b[off + 7] == 2))
+      {
+        cur = nif++;
+        ifs[cur].ifnum = b[off + 2];
+        ifs[cur].mouse = b[off + 7] == 2;
+        ifs[cur].ep = 0;
+      }
     }
-    else if (b[off + 1] == 5 && iface_kbd && !epaddr &&   /* interrupt IN */
+    else if (b[off + 1] == 5 && cur >= 0 && !ifs[cur].ep &&      /* interrupt IN */
              (b[off + 2] & 0x80) && (b[off + 3] & 3) == 3)
     {
-      epaddr = b[off + 2];
-      epmps = (b[off + 4] | b[off + 5] << 8) & 0x7ff;
-      binterval = b[off + 6];
+      ifs[cur].ep = b[off + 2];
+      ifs[cur].mps = (b[off + 4] | b[off + 5] << 8) & 0x7ff;
+      ifs[cur].interval = b[off + 6];
     }
   }
-  if (ifnum < 0 || !epaddr || nkbd == MAX_KBD)
+  for (i = n = 0; i < nif; i++)         /* keep those with an endpoint */
+    if (ifs[i].ep)
+      ifs[n++] = ifs[i];
+  nif = n;
+  if (!nif || nkbd + nif > MAX_KBD)
   {
-    kprintf("xhci: port %u: not a keyboard, ignored\n", port);
+    kprintf("xhci: port %u: no keyboard or mouse, ignored\n", port);
     return;
   }
 
   /* configure: boot protocol, report on change only */
   if (control(h, &ep0, slot, 0x00, 9, (uint16_t)cfgval, 0, 0, 0))
     return;
-  control(h, &ep0, slot, 0x21, 0x0b, 0, (uint16_t)ifnum, 0, 0);    /* SET_PROTOCOL boot */
-  control(h, &ep0, slot, 0x21, 0x0a, 0, (uint16_t)ifnum, 0, 0);    /* SET_IDLE 0 */
-
-  k = &kbds[nkbd];
-  memset(k, 0, sizeof(*k));
-  k->hc = h;
-  k->slot = slot;
-  k->dci = (epaddr & 0xf) * 2 + 1;
-  if (!ring_init(&k->ring) || !(k->bufs = page_alloc()))
-    return;
   memset(pool_ptr(in), 0, 4096);
-  ctx(in, h, 0)[1] = 1u | 1u << k->dci;
+  ctx(in, h, 0)[1] = 1;
+  maxdci = 0;
+  for (i = 0; i < nif; i++)
+  {
+    control(h, &ep0, slot, 0x21, 0x0b, 0, (uint16_t)ifs[i].ifnum, 0, 0);  /* SET_PROTOCOL boot */
+    control(h, &ep0, slot, 0x21, 0x0a, 0, (uint16_t)ifs[i].ifnum, 0, 0);  /* SET_IDLE 0 */
+    k = &kbds[nkbd + i];
+    memset(k, 0, sizeof(*k));
+    k->hc = h;
+    k->slot = slot;
+    k->mouse = ifs[i].mouse;
+    k->dci = (ifs[i].ep & 0xf) * 2 + 1;
+    if (!ring_init(&k->ring) || !(k->bufs = page_alloc()))
+      return;
+    if (k->dci > maxdci)
+      maxdci = k->dci;
+    ctx(in, h, 0)[1] |= 1u << k->dci;
+    c = ctx(in, h, k->dci + 1);
+    c[0] = ep_interval((int)speed, (uint8_t)ifs[i].interval) << 16;
+    c[1] = 3u << 1 | 7u << 3 | (uint32_t)ifs[i].mps << 16;   /* CErr 3, interrupt IN */
+    c[2] = k->ring.phys | 1;
+    c[4] = 8 | (uint32_t)ifs[i].mps << 16;
+  }
   c = ctx(in, h, 1);
-  c[0] = speed << 20 | (uint32_t)k->dci << 27;
+  c[0] = speed << 20 | (uint32_t)maxdci << 27;
   c[1] = port << 16;
-  c = ctx(in, h, k->dci + 1);
-  c[0] = ep_interval((int)speed, (uint8_t)binterval) << 16;
-  c[1] = 3u << 1 | 7u << 3 | (uint32_t)epmps << 16;   /* CErr 3, interrupt IN */
-  c[2] = k->ring.phys | 1;
-  c[4] = 8 | (uint32_t)epmps << 16;
   if ((cc = command(h, in, TRB_CONFIG_EP << 10 | (uint32_t)slot << 24)) != CC_SUCCESS)
   {
     kprintf("xhci: port %u: configure endpoint failed (%d)\n", port, cc);
     return;
   }
-  nkbd++;
-  for (off = 0; off < NBUF; off++)
-    ring_push(&k->ring, k->bufs + off * 64, 0, 8, TRB_NORMAL << 10 | 1 << 5 | 1 << 2);
-  h->db[slot] = (uint32_t)k->dci;
-  kprintf("xhci: port %u: keyboard (speed %u, slot %d)\n", port, speed, slot);
+  for (i = 0; i < nif; i++)
+  {
+    k = &kbds[nkbd + i];
+    for (off = 0; off < NBUF; off++)
+      ring_push(&k->ring, k->bufs + off * 64, 0, 8, TRB_NORMAL << 10 | 1 << 5 | 1 << 2);
+    h->db[slot] = (uint32_t)k->dci;
+    kprintf("xhci: port %u: %s (speed %u, slot %d)\n", port, k->mouse ? "mouse" : "keyboard",
+            speed, slot);
+  }
+  nkbd += nif;
   page_free(in);
   page_free(buf);
 }

@@ -20,8 +20,8 @@ Rufus in "DD image" mode), or burn it to a CD.
 
 On UEFI, MDVMM starts first and provides the PC BIOS that DOS expects:
 text console on the GOP framebuffer, keyboard (PS/2 or USB on xHCI root
-ports), timer, SATA (AHCI) and NVMe disks, VBE graphics, extended
-memory for XMS. DOS then boots from \MODERNDOS\BOOT.IMG (drive A:, a RAM
+ports), USB mouse (INT 33h), timer, SATA (AHCI) and NVMe disks, VBE
+graphics, extended memory for XMS. DOS then boots from \MODERNDOS\BOOT.IMG (drive A:, a RAM
 copy: changes to A: are lost at reboot).
 
 Hard disks are READ-ONLY by default. DOS can see FAT partitions on the
@@ -31,12 +31,12 @@ at your own risk.
 
 At the DOS prompt
 -----------------
-  MDVMM          on UEFI: set up DOS sessions; on BIOS PCs: start the
-                 virtual machine monitor (needs HIMEMX, loaded already)
+  MDVMM          on UEFI: mouse driver and DOS sessions; on BIOS PCs:
+                 start the virtual machine monitor (needs HIMEMX)
   MDVMM NEW      start another DOS session; Ctrl+Alt+F1..F4 switch
   GFXDEMO        draw a test picture in graphics mode for 3 seconds
 
-Not yet: the desktop GUI (milestone M4), mouse, USB hubs, networking.
+Not yet: the desktop GUI (milestone M4), USB hubs, networking.
 
 Source: https://github.com/kaleaditya28897-linux/modernDOS (branch modern)
 License: GNU GPL v2 (see COPYING). FreeCOM and HIMEMX are from FreeDOS.
