@@ -213,6 +213,19 @@ void mouse_input(int buttons, int dx, int dy);
 int mouse_text_cell(void);
 void int33(struct frame *f);
 
+/* nic.c, e1000.c: network cards (DOS and UEFI boots) */
+struct nic {
+  const char *name;
+  uint8_t mac[6];
+  int (*send)(struct nic *n, const void *frame, int len);     /* 0 ok */
+  int (*recv)(struct nic *n, void *frame, int room);   /* len, 0 none, -1 dropped */
+  int (*link)(struct nic *n);
+};
+void nic_register(struct nic *n);
+void nic_init(void);
+void nic_api(struct frame *f);
+void e1000_init(void);
+
 /* dma.c */
 void dma_init(void);
 int dma_port(uint16_t port);

@@ -41,7 +41,7 @@ OVMF=/usr/share/ovmf/OVMF.fd
 echo "== building MDVMM and test programs"
 make -s -C "$ROOT/mdvmm"
 make -s -C "$ROOT/gui"
-for p in v86chk poweroff xmstest; do
+for p in v86chk poweroff xmstest netchk; do
   "$NASM" -f bin -o "$WORK/$p.com" "$ROOT/tests/mdvmm/$p.asm"
 done
 ia16-elf-gcc -mcmodel=small -Os -o "$WORK/lfntest.exe" "$ROOT/tests/lfn/lfntest.c" -li86
@@ -64,6 +64,10 @@ ECHO Hello from DOS on UEFI
 A:\MDVMM.COM
 IF ERRORLEVEL 1 GOTO END
 A:\V86CHK.COM
+IF ERRORLEVEL 1 GOTO END
+A:\PKTDRV.COM
+IF ERRORLEVEL 1 GOTO END
+A:\NETCHK.COM
 IF ERRORLEVEL 1 GOTO END
 A:\XMSTEST.COM
 IF ERRORLEVEL 1 GOTO END
@@ -119,6 +123,8 @@ export MTOOLS_SKIP_CHECK=1
 mcopy -i boot.img /opt/fdos/bin/command.com ::COMMAND.COM
 mcopy -i boot.img autoexec.bat ::AUTOEXEC.BAT
 mcopy -i boot.img v86chk.com ::V86CHK.COM
+mcopy -i boot.img "$ROOT/mdvmm/build/PKTDRV.COM" ::PKTDRV.COM
+mcopy -i boot.img netchk.com ::NETCHK.COM
 mcopy -i boot.img poweroff.com ::POWEROFF.COM
 mcopy -i boot.img lfntest.exe ::LFNTEST.EXE
 mcopy -i boot.img djtest.exe ::DJTEST.EXE
@@ -247,7 +253,7 @@ ui_drv=$!
 (cd "$ROOT/tests/gui" && PYTHONDONTWRITEBYTECODE=1 exec python3 deskdrive.py "$WORK/debug.log" "$WORK/mon.sock" "$WORK/desk.ppm") &
 desk_drv=$!
 timeout --foreground 300 qemu-system-x86_64 -m 256 -bios "$OVMF" \
-  -drive file=esp.img,format=raw,if=ide -net none -display none \
+  -drive file=esp.img,format=raw,if=ide -nic user,model=e1000 -display none \
   -device ahci,id=ahci -drive id=hd,file=hd.img,format=raw,if=none \
   -device ide-hd,drive=hd,bus=ahci.0 \
   -drive id=nv,file=nvme.img,format=raw,if=none \
@@ -272,7 +278,7 @@ for marker in "MDVMM core:" "bios: disk image" "fbcon:" "v86: entering VM1" \
               "SESSIONS: 0 failures" "GFXTEST: text mode again" "ahci: port 0: QEMU HARDDISK" \
               "bios: hard disks are writable" \
               "nvme: namespace 1: 96 MB" "DISKTEST: 0 failures" \
-              "disk test on D:" "xhci: port [0-9]*: keyboard" "xhci: port [0-9]*: mouse" "mouse: first report" "bios: mouse driver installed" \
+              "disk test on D:" "nic: Intel e1000" "Packet driver at INT 60h" "netchk: ARP reply from 10.0.2.2" "xhci: port [0-9]*: keyboard" "xhci: port [0-9]*: mouse" "mouse: first report" "bios: mouse driver installed" \
               "usbkbd: first key report"; do
   if grep -q "$marker" debug.log; then echo "  ok   log: $marker"; else
     echo "  FAIL log missing: $marker"; fail=1; fi

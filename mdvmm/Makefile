@@ -19,8 +19,8 @@ B       = build
 # core objects; the UEFI core adds the virtual BIOS and native drivers,
 # the DOS core (MDVMM.COM, 64 KB limit) has stubs instead
 COBJS   = $(B)/entry.o $(B)/main.o $(B)/lib.o $(B)/mm.o $(B)/cpu.o $(B)/v86.o $(B)/dpmi.o \
-          $(B)/vm.o $(B)/dma.o
-UEFIOBJS = $(B)/bios.o $(B)/fbcon.o $(B)/font.o $(B)/romimg.o $(B)/pci.o $(B)/ahci.o $(B)/nvme.o \
+          $(B)/vm.o $(B)/dma.o $(B)/pci.o $(B)/nic.o $(B)/e1000.o
+UEFIOBJS = $(B)/bios.o $(B)/fbcon.o $(B)/font.o $(B)/romimg.o $(B)/ahci.o $(B)/nvme.o \
           $(B)/xhci.o $(B)/usbkbd.o $(B)/mouse.o
 DOSOBJS = $(B)/nobios.o
 HDRS    = core/core.h include/bootinfo.h
@@ -29,7 +29,7 @@ CFLAGS64 = -m64 -std=gnu11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-builtin
           -fpie -fno-stack-protector -mno-red-zone -mgeneral-regs-only \
           -fno-asynchronous-unwind-tables -fshort-wchar -Iinclude -Iuefi
 
-all: $(B)/MDVMM.COM $(B)/BOOTX64.EFI
+all: $(B)/MDVMM.COM $(B)/BOOTX64.EFI $(B)/PKTDRV.COM
 
 $(B):
 	mkdir -p $(B)
@@ -72,6 +72,9 @@ $(B)/uefi_hwinfo.o: uefi/hwinfo.c uefi/efi.h | $(B)
 $(B)/BOOTX64.EFI: $(B)/uefi_main.o $(B)/uefi_hwinfo.o $(B)/uefi_start.o uefi/efi.ld
 	$(LD64) -m i386pep --subsystem 10 --image-base 0x10000000 -e efi_main --enable-reloc-section -nostdlib \
 	  -T uefi/efi.ld -o $@ $(B)/uefi_main.o $(B)/uefi_hwinfo.o $(B)/uefi_start.o
+
+$(B)/PKTDRV.COM: pktdrv/pktdrv.asm | $(B)
+	$(NASM) -f bin -o $@ $<
 
 clean:
 	rm -rf $(B)

@@ -27,7 +27,7 @@ TEST="$ROOT/test"
 echo "== building MDVMM and test programs"
 make -s -C "$ROOT/mdvmm"
 make -s -C "$ROOT/gui"
-for p in v86chk poweroff xmstest; do
+for p in v86chk poweroff xmstest netchk; do
   "$NASM" -f bin -o "$WORK/$p.com" "$HERE/$p.asm"
 done
 ia16-elf-gcc -mcmodel=small -Os -o "$WORK/lfntest.exe" "$ROOT/tests/lfn/lfntest.c" -li86
@@ -51,6 +51,10 @@ A:\CTMOUSE.EXE
 A:\MDVMM.COM
 IF ERRORLEVEL 1 GOTO END
 A:\V86CHK.COM
+IF ERRORLEVEL 1 GOTO END
+A:\PKTDRV.COM
+IF ERRORLEVEL 1 GOTO END
+A:\NETCHK.COM
 IF ERRORLEVEL 1 GOTO END
 A:\XMSTEST.COM
 IF ERRORLEVEL 1 GOTO END
@@ -99,6 +103,8 @@ mcopy -i disk.img /opt/fdos/bin/himemx.exe ::HIMEMX.EXE
 mcopy -i disk.img autoexec.bat ::AUTOEXEC.BAT
 mcopy -i disk.img "$ROOT/mdvmm/build/MDVMM.COM" ::MDVMM.COM
 mcopy -i disk.img v86chk.com ::V86CHK.COM
+mcopy -i disk.img "$ROOT/mdvmm/build/PKTDRV.COM" ::PKTDRV.COM
+mcopy -i disk.img netchk.com ::NETCHK.COM
 mcopy -i disk.img xmstest.com ::XMSTEST.COM
 mcopy -i disk.img poweroff.com ::POWEROFF.COM
 mcopy -i disk.img lfntest.exe ::LFNTEST.EXE
@@ -155,7 +161,7 @@ wm_drv=$!
 ui_drv=$!
 (cd "$ROOT/tests/gui" && PYTHONDONTWRITEBYTECODE=1 exec python3 deskdrive.py "$WORK/debug.log" "$WORK/mon.sock" "$WORK/desk.ppm") &
 desk_drv=$!
-timeout --foreground 300 "$QEMU" -m 64 \
+timeout --foreground 300 "$QEMU" -m 64 -nic user,model=e1000 \
   -drive file=disk.img,format=raw,if=floppy -display none \
   -debugcon file:debug.log -no-reboot \
   -monitor unix:mon.sock,server,nowait $QEMU_EXTRA </dev/null || true
@@ -171,7 +177,7 @@ for marker in "MDVMM core:" "v86: entering VM1" "v86chk: protected mode bit set"
               "xmstest: 4K round trip" "RESULT: PASSED" "dpmi: 32 bit client" \
               "DJGPP: 0 failures" "DPMI: 0 failures" "vm: sessions enabled" \
               "vm: session 1 started" "vm: focus session 1" "vm: session 1 ended" \
-              "SESSIONS: 0 failures" "GFXTEST: text mode again"; do
+              "SESSIONS: 0 failures" "nic: Intel e1000" "Packet driver at INT 60h" "netchk: ARP reply from 10.0.2.2" "GFXTEST: text mode again"; do
   if grep -q "$marker" debug.log; then echo "  ok   log: $marker"; else
     echo "  FAIL log missing: $marker"; fail=1; fi
 done

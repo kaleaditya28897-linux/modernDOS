@@ -226,6 +226,11 @@ static int intercept(struct frame *f, uint8_t vec)
     vm_yield(f);                /* DOS idle: let other sessions run */
   else if (vec == 0x2f && AH(f) == 0xde)
   {
+    if (AL(f) >= 0x10 && AL(f) <= 0x1f)
+    {
+      nic_api(f);               /* network (nic.c) */
+      return 1;
+    }
     if (vm_api(f))
       return 1;
     switch (AL(f))
