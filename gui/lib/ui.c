@@ -27,7 +27,7 @@
 #define C_BUTTON    RGB(224, 228, 234)
 #define C_PRESSED   RGB(196, 204, 214)
 #define C_FIELD     RGB(255, 255, 255)
-#define C_ACCENT    RGB(32, 128, 136)
+#define C_ACCENT    theme.accent
 #define C_ACCENT_TX RGB(255, 255, 255)
 #define C_BAR       RGB(228, 232, 238)
 
@@ -521,7 +521,7 @@ static void edit_draw(struct surface *s, struct widget *w, int focused)
     memcpy(part, b->line[ln] + (b->left < b->len[ln] ? b->left : b->len[ln]), n);
     part[n] = 0;
     if (ln == b->cl && focused)
-      draw_fill(s, w->x + 2, y, w->w - SCROLL_W - 5, FONT_H, RGB(238, 246, 247));
+      draw_fill(s, w->x + 2, y, w->w - SCROLL_W - 5, FONT_H, theme.accent_soft);
     draw_text(s, w->x + 5, y, part, C_INK, TEXT_TRANSPARENT);
     if (ln == b->cl && focused)
       draw_vline(s, w->x + 5 + (b->cc - b->left) * FONT_W, y, FONT_H, C_INK);
@@ -705,6 +705,9 @@ static int pm_handler(struct window *win, const struct event *e)
 
   switch (e->type)
   {
+    case EV_REDRAW:
+      pm_draw();
+      return 1;
     case EV_CLOSE:
       pm_end(-1);
       return 1;
@@ -1034,6 +1037,9 @@ static int handler(struct window *win, const struct event *e)
 
   switch (e->type)
   {
+    case EV_REDRAW:
+      ui_redraw(ui);
+      return 1;
     case EV_MOUSE_DOWN:
       if (e->button == MB_LEFT)
         used = mouse_down(ui, e);

@@ -6,7 +6,9 @@ Opens About from the launcher, opens Run, runs V86CHK (a DOS program:
 it logs again), returns to the desktop with a key, takes a screenshot;
 then the file manager: creates, renames, opens and deletes a folder on
 A:; then opens A:\Created On Linux.txt in the editor from Files, adds to
-it, saves with Ctrl+S, closes; exits through the launcher.
+it, saves with Ctrl+S, closes; then Settings: Ocean, Orange, 12-hour
+clock, Save; exits through the launcher. (AUTOEXEC then starts MDDESK
+/TEST /EXIT, which must load those settings.)
 """
 import os
 import re
@@ -81,6 +83,26 @@ def editor(mouse, sock, log, shot):
     wait(log, "MDDESK: editor closed", 10)
 
 
+def settings(mouse, sock, log, shot):
+    """Settings: Ocean background, Orange accent, 12-hour clock, save."""
+    mouse.click(*point(log, "launcher"))
+    time.sleep(0.5)
+    mouse.click(*point(log, "settings"))
+    if not wait(log, "MDDESK: window Settings", 10):
+        return
+    time.sleep(0.5)
+    mouse.click(*point(log, "bg_Ocean"))
+    mouse.click(*point(log, "accent_Orange"))
+    mouse.click(*point(log, "settings_clock24"))
+    mouse.click(*point(log, "settings_save"))
+    wait(log, "MDDESK: settings saved", 10)
+    time.sleep(1)
+    send(sock, "screendump %s" % shot)
+    time.sleep(1)
+    mouse.click(*point(log, "settings_close"))
+    time.sleep(0.5)
+
+
 def main():
     log, sock, out = sys.argv[1:4]
     if not wait(log, "MDDESK: ready", 290):
@@ -108,6 +130,8 @@ def main():
     files(mouse, sock, log, os.path.join(os.path.dirname(out), "files.ppm"))
     time.sleep(1)
     editor(mouse, sock, log, os.path.join(os.path.dirname(out), "editor.ppm"))
+    time.sleep(1)
+    settings(mouse, sock, log, os.path.join(os.path.dirname(out), "settings.ppm"))
     time.sleep(1)
     mouse.click(*point(log, "launcher"))
     time.sleep(0.5)

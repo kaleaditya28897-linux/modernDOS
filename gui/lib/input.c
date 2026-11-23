@@ -14,6 +14,7 @@
 #define QSIZE 32
 
 static int mouse, mx, my, mbuttons;
+static int speed = 8;                   /* mickeys per 8 pixels */
 static struct event queue[QSIZE];
 static int qhead, qtail;
 
@@ -57,9 +58,9 @@ int input_open(void)
   r.x.cx = 0;
   r.x.dx = (unsigned short)(m->h - 1);
   int33(&r);
-  r.x.ax = 0x000f;                      /* 8 mickeys per 8 pixels both ways */
-  r.x.cx = 8;
-  r.x.dx = 8;
+  r.x.ax = 0x000f;                      /* mickeys per 8 pixels, both ways */
+  r.x.cx = (unsigned short)speed;
+  r.x.dx = (unsigned short)speed;
   int33(&r);
   r.x.ax = 0x0013;                      /* no double speed */
   r.x.dx = 0x7fff;
@@ -72,6 +73,20 @@ int input_open(void)
   int33(&r);
   mbuttons = 0;
   return 1;
+}
+
+void input_set_speed(int mickeys)
+{
+  __dpmi_regs r;
+
+  speed = mickeys > 0 ? mickeys : 8;
+  if (!mouse)
+    return;
+  memset(&r, 0, sizeof(r));
+  r.x.ax = 0x000f;
+  r.x.cx = (unsigned short)speed;
+  r.x.dx = (unsigned short)speed;
+  int33(&r);
 }
 
 void input_close(void)

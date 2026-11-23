@@ -6,8 +6,9 @@
  * program: the desktop goes to text mode, runs it through COMMAND.COM,
  * waits for a key and comes back) and Exit to DOS.
  *
- *   MDDESK [/TEST]   /TEST logs positions and events to port E9h for the
- *                    test harness (tests/gui/deskdrive.py)
+ *   MDDESK [/TEST] [/EXIT]
+ *     /TEST logs positions and events to port E9h for the test harness
+ *     (tests/gui/deskdrive.py); /EXIT starts and leaves at once
  *
  * Not yet: starting DJGPP (32-bit DPMI) programs from the desktop - the
  * DPMI host runs one client at a time.
@@ -29,11 +30,10 @@
 #define C_PANEL_LINE RGB(48, 58, 74)
 #define C_PANEL_TEXT RGB(220, 226, 234)
 #define C_TASK       RGB(44, 52, 66)
-#define C_TASK_TOP   RGB(32, 128, 136)
 
-int test_mode;
-static int quit, menu_open_now;
-static char clock_text[8];
+int test_mode, clock24 = 1;
+static int quit, menu_open_now, exit_at_once;
+static char clock_text[12];
 static char last_tasks[256];
 static struct window *about_win, *run_win;
 static struct widget *run_field;
@@ -79,8 +79,8 @@ static void draw_panel(struct surface *s)
   draw_fill(s, 0, 0, s->w, PANEL_H, C_PANEL);
   draw_hline(s, 0, PANEL_H - 1, s->w, C_PANEL_LINE);
   /* launcher */
-  draw_fill(s, 6, 4, launcher_w(), PANEL_H - 8, menu_open_now ? C_TASK_TOP : C_TASK);
-  draw_fill(s, 14, PANEL_H / 2 - 4, 8, 8, RGB(64, 200, 200));
+  draw_fill(s, 6, 4, launcher_w(), PANEL_H - 8, menu_open_now ? theme.accent : C_TASK);
+  draw_fill(s, 14, PANEL_H / 2 - 4, 8, 8, theme.accent_hi);
   draw_text(s, 30, (PANEL_H - FONT_H) / 2, "modernDOS", C_PANEL_TEXT, TEXT_TRANSPARENT);
   /* open windows */
   for (i = 0; i < wm_count(); i++)
@@ -91,7 +91,7 @@ static void draw_panel(struct surface *s)
       continue;
     strncpy(t, w->title, 17);
     t[17] = 0;
-    draw_fill(s, x, 4, TASK_W, PANEL_H - 8, w == top ? C_TASK_TOP : C_TASK);
+    draw_fill(s, x, 4, TASK_W, PANEL_H - 8, w == top ? theme.accent : C_TASK);
     draw_text(s, x + 8, (PANEL_H - FONT_H) / 2, t, C_PANEL_TEXT, TEXT_TRANSPARENT);
     n += sprintf(tasks + n, " %s=%d,%d", w->title, x + TASK_W / 2, PANEL_H / 2);
     x += TASK_W + 6;
@@ -120,15 +120,27 @@ static void tick_clock(void)
 {
   time_t t = time(0);
   struct tm *tm = localtime(&t);
-  char now[8];
+  char now[12];
 
-  sprintf(now, "%02d:%02d", tm->tm_hour, tm->tm_min);
+  if (clock24)
+    sprintf(now, "%02d:%02d", tm->tm_hour, tm->tm_min);
+  else
+    sprintf(now, "%d:%02d %s", tm->tm_hour % 12 ? tm->tm_hour % 12 : 12, tm->tm_min,
+            tm->tm_hour < 12 ? "AM" : "PM");
   if (strcmp(now, clock_text))
   {
     strcpy(clock_text, now);
     panel_damage();
     tlog("MDDESK: clock %s\n", clock_text);
   }
+}
+
+/* redraw the clock now (its format changed) */
+void desk_clock_refresh(void)
+{
+  clock_text[0] = 0;
+  if (gfx_screen())
+    tick_clock();
 }
 
 /* ---------------------------------------------------------------- */
@@ -294,10 +306,10 @@ static void open_run(void)
 /* ---------------------------------------------------------------- */
 /* launcher                                                         */
 
-static const char *const launcher_items[] = { "About modernDOS", "Files", "Editor", "Run...",
-                                             "Exit to DOS" };
-static const char *const launcher_names[] = { "about", "files", "editor", "run", "exit" };
-#define NLAUNCH 5
+static const char *const launcher_items[] = { "About modernDOS", "Files", "Editor", "Settings",
+                                             "Run...", "Exit to DOS" };
+static const char *const launcher_names[] = { "about", "files", "editor", "settings", "run", "exit" };
+#define NLAUNCH 6
 
 static void launcher_choose(int item, void *user)
 {
@@ -309,8 +321,9 @@ static void launcher_choose(int item, void *user)
     case 0: open_about(); break;
     case 1: files_open(0); break;
     case 2: editor_open(0); break;
-    case 3: open_run(); break;
-    case 4: quit = 1; break;
+    case 3: settings_open(); break;
+    case 4: open_run(); break;
+    case 5: quit = 1; break;
   }
 }
 
@@ -368,8 +381,13 @@ int main(int argc, char **argv)
   int i;
 
   for (i = 1; i < argc; i++)
+  {
     if (!strcasecmp(argv[i], "/TEST"))
       test_mode = 1;
+    if (!strcasecmp(argv[i], "/EXIT"))
+      exit_at_once = 1;                 /* start, show, leave (tests) */
+  }
+  settings_load(argv[0]);
   if (gfx_open(1024, 768))
   {
     printf("MDDESK: %s\n", gfx_error());
@@ -385,6 +403,7 @@ int main(int argc, char **argv)
   gfx_cursor_show(1);
   tlog("MDDESK: widget launcher %d,%d\n", 6 + launcher_w() / 2, PANEL_H / 2);
   tlog("MDDESK: ready at %d,%d\n", s->w / 2, s->h / 2);
+  quit = exit_at_once;
 
   while (!quit)
   {

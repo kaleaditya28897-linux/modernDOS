@@ -38,6 +38,11 @@ def main():
          "MDDESK: editor saved A:\\Created On Linux.txt, 53 bytes: hello from linux - edited in modernDOS"
          in log),
         ("Editor: closed", "MDDESK: editor closed" in log),
+        ("Settings: saved", "MDDESK: settings saved background=Ocean accent=Orange clock=12 mouse=Normal"
+         in log),
+        ("Settings: the clock went to 12 hours", bool(re.search(r"MDDESK: clock \d{1,2}:\d\d [AP]M", log))),
+        ("Settings: the next MDDESK loads them",
+         "MDDESK: settings loaded background=Ocean accent=Orange clock=12 mouse=Normal" in log),
         ("Files: gone from the listing",
          bool(re.findall(r"MDDESK: files A:\\ \d+:(.*)", log))
          and "Renamed Dir" not in re.findall(r"MDDESK: files A:\\ \d+:(.*)", log)[-1]),
@@ -55,6 +60,22 @@ def main():
             checks.append(("About window drawn, active", pixel(ax + 200, ay + 12) == ACTIVE))
     except (OSError, ValueError) as e:
         checks.append(("screenshot: %s" % e, False))
+    try:
+        sw, sh, spx = read_ppm(os.path.join(os.path.dirname(os.path.abspath(sys.argv[2])),
+                                            "settings.ppm"))
+
+        def spixel(x, y):
+            i = (y * sw + x) * 3
+            return tuple(spx[i:i + 3])
+
+        win = re.search(r"MDDESK: window Settings at (\d+),(\d+)", log)
+        checks.append(("Settings: Ocean desktop", spixel(10, sh - 1) == (8, 28, 52)))
+        if win:
+            wx, wy = int(win.group(1)), int(win.group(2))
+            checks.append(("Settings: Orange title bar",
+                           spixel(wx + 200, wy + 12) == (196, 104, 32)))
+    except (OSError, ValueError) as e:
+        checks.append(("settings screenshot: %s" % e, False))
     fail = 0
     for name, ok in checks:
         print("  %s desk: %s" % ("ok  " if ok else "FAIL", name))

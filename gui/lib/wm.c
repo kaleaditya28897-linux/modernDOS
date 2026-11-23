@@ -19,10 +19,8 @@
 #define CLOSE_W     18
 
 /* theme */
-#define C_DESK_TOP     RGB(36, 52, 71)
-#define C_DESK_BOTTOM  RGB(18, 28, 40)
 #define C_TITLE        RGB(58, 66, 82)
-#define C_TITLE_ACTIVE RGB(32, 128, 136)
+#define C_TITLE_ACTIVE theme.accent
 #define C_TITLE_TEXT   RGB(236, 240, 244)
 #define C_BORDER       RGB(20, 24, 30)
 #define C_CLOSE        RGB(196, 72, 64)
@@ -222,7 +220,7 @@ void wm_raise(struct window *w)
 
 static void draw_desktop(struct surface *s)
 {
-  draw_gradient(s, 0, 0, s->w, s->h, C_DESK_TOP, C_DESK_BOTTOM);
+  draw_gradient(s, 0, 0, s->w, s->h, theme.desk_top, theme.desk_bottom);
   draw_text(s, s->w - text_width("modernDOS") - 16, s->h - FONT_H - 12, "modernDOS",
             RGB(90, 110, 130), TEXT_TRANSPARENT);
   if (desk_draw)
@@ -252,7 +250,7 @@ static void draw_window(struct surface *s, const struct window *w, int active)
     return;
   }
   draw_fill(s, w->x + 1, w->y + 1, w->w - 2, WM_TITLE_H - 1, title);
-  draw_hline(s, w->x + 1, w->y + 1, w->w - 2, active ? RGB(64, 168, 176) : RGB(78, 86, 102));
+  draw_hline(s, w->x + 1, w->y + 1, w->w - 2, active ? theme.accent_hi : RGB(78, 86, 102));
   /* title text, cut to fit */
   strcpy(t, w->title);
   for (i = (int)strlen(t); i > 0 && text_width(t) > tw; i--)
@@ -407,6 +405,21 @@ int wm_dispatch(const struct event *e)
       return deliver(wm_focus(), e);
   }
   return 0;
+}
+
+void wm_redraw_all(void)
+{
+  struct event e;
+  struct surface *s = gfx_screen();
+  int i;
+
+  memset(&e, 0, sizeof(e));
+  e.type = EV_REDRAW;
+  for (i = 0; i < nwin; i++)
+    if (wins[i]->handler)
+      wins[i]->handler(wins[i], &e);
+  if (s)
+    wm_damage(0, 0, s->w, s->h);
 }
 
 void wm_quit(void)

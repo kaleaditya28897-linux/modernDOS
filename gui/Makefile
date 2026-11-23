@@ -8,7 +8,7 @@ CC      = $(DJGPP)gcc
 CFLAGS  = -O2 -Wall -Wextra -Werror -Ilib
 
 B       = build
-OBJS    = $(B)/gfx.o $(B)/draw.o $(B)/text.o $(B)/input.o $(B)/wm.o $(B)/ui.o $(B)/font.o
+OBJS    = $(B)/gfx.o $(B)/draw.o $(B)/text.o $(B)/input.o $(B)/wm.o $(B)/ui.o $(B)/theme.o $(B)/font.o
 
 all: $(B)/mdgui.o $(B)/MDDESK.EXE
 
@@ -24,7 +24,7 @@ $(B)/font.o: ../mdvmm/core/font.c | $(B)
 $(B)/mdgui.o: $(OBJS)
 	$(CC) -r -nostdlib -o $@ $(OBJS)
 
-DESK    = desk/desk.c desk/files.c desk/editor.c
+DESK    = desk/desk.c desk/files.c desk/editor.c desk/settings.c
 
 $(B)/MDDESK.EXE: $(DESK) desk/desk.h $(B)/mdgui.o lib/mdgui.h
 	$(CC) $(CFLAGS) -s -o $@ $(DESK) $(B)/mdgui.o

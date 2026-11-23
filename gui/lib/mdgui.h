@@ -34,6 +34,15 @@ struct gfx_mode {
   uint32_t phys;                        /* framebuffer address */
 };
 
+/* theme.c - colors the window manager and the widgets use */
+struct theme {
+  color_t desk_top, desk_bottom;        /* desktop gradient */
+  color_t accent;                       /* active title bar, focus, selection */
+  color_t accent_hi;                    /* lighter: the title bar's top line */
+  color_t accent_soft;                  /* very light: the editor's line */
+};
+extern struct theme theme;
+
 /* gfx.c - display */
 int gfx_open(int want_w, int want_h);   /* 0 = ok, else an error message */
 const char *gfx_error(void);
@@ -86,6 +95,7 @@ struct event {
 };
 
 int input_open(void);                   /* 1 if there is a mouse */
+void input_set_speed(int mickeys);      /* per 8 pixels: 8 normal, more slower */
 int input_poll(struct event *e);        /* 1 if *e is an event */
 void input_wait(struct event *e);       /* until there is one; idles */
 void input_close(void);
@@ -97,7 +107,7 @@ void input_close(void);
 struct window;
 /* event handler: mouse coordinates are client coordinates; return 1 if
    handled. EV_CLOSE when the close button is clicked (default: close) */
-enum { EV_CLOSE = 100 };
+enum { EV_CLOSE = 100, EV_REDRAW };    /* EV_REDRAW: draw the contents again */
 typedef int (*wm_handler)(struct window *w, const struct event *e);
 
 struct window {
@@ -124,6 +134,7 @@ struct window *wm_window(int i);        /* bottom (0) to top */
 void wm_invalidate(struct window *w);   /* client contents changed */
 void wm_damage(int x, int y, int w, int h);
 void wm_update(void);                   /* repaint and present damage */
+void wm_redraw_all(void);               /* EV_REDRAW to every window (new theme) */
 int wm_dispatch(const struct event *e); /* route one event; 0 if unused */
 void wm_run(int (*idle)(void));         /* until wm_quit; idle may be 0 */
 /* the desktop's content: a band of `top` pixels windows stay below (a

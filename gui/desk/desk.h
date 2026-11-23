@@ -15,5 +15,10 @@ void desk_widget(const char *name, const struct widget *w);   /* test log */
 /* applications */
 void files_open(const char *path);      /* file manager */
 void editor_open(const char *path);     /* text editor; 0: a new text */
+void settings_open(void);
+void settings_load(const char *argv0);  /* MDDESK.CFG, applies it */
+
+extern int clock24;                     /* 24 or 12 hour clock */
+void desk_clock_refresh(void);
 
 #endif
