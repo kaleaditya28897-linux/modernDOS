@@ -11,6 +11,7 @@
  */
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include "mdgui.h"
 
 #define MAX_WIDGETS 64
@@ -441,6 +442,15 @@ static void act(struct widget *w)
     w->action(w);
 }
 
+/* list: Enter or a double click */
+static void activate(struct widget *w)
+{
+  if (w->activate)
+    w->activate(w);
+  else
+    act(w);
+}
+
 static void list_select(struct widget *w, int item)
 {
   int rows = list_rows(w);
@@ -550,7 +560,7 @@ static int key(struct ui *ui, const struct event *e)
       if (e->scan == 0x50) { list_select(w, w->value + 1); act(w); return 1; }
       if (e->scan == 0x47) { list_select(w, 0); act(w); return 1; }
       if (e->scan == 0x4f) { list_select(w, w->nitems - 1); act(w); return 1; }
-      if (e->ascii == 13) { act(w); return 1; }
+      if (e->ascii == 13) { activate(w); return 1; }
       break;
     case UI_TEXT:
       return text_key(w, e);
@@ -608,13 +618,27 @@ static int mouse_down(struct ui *ui, const struct event *e)
       i = w->scroll + (e->y - w->y - 2) / ROW_H;
       if (e->y >= w->y + 2 && i < w->nitems)
       {
+        int again = i == w->value && clock() - w->last_click < CLOCKS_PER_SEC / 2;
         list_select(w, i);
-        act(w);
+        if (again)
+          activate(w);                  /* double click */
+        else
+          act(w);
+        w->last_click = again ? 0 : clock();
       }
       break;
     }
   }
   return 1;
+}
+
+static int alive(const struct window *win)
+{
+  int i;
+  for (i = 0; i < wm_count(); i++)
+    if (wm_window(i) == win)
+      return 1;
+  return 0;
 }
 
 static int handler(struct window *win, const struct event *e)
@@ -644,7 +668,7 @@ static int handler(struct window *win, const struct event *e)
   }
   if (used)
   {
-    if (ui->win == win)                 /* the action may have closed it */
+    if (alive(win))                     /* the action may have closed it */
       ui_redraw(ui);
     return 1;
   }
@@ -663,4 +687,125 @@ struct ui *ui_new(struct window *win)
   win->user = ui;
   ui_redraw(ui);
   return ui;
+}
+
+/* ---------------------------------------------------------------- */
+/* dialogs                                                          */
+
+struct dialog {
+  struct window *win;
+  struct widget *field;
+  void (*text_done)(const char *text, void *user);
+  void (*confirm_done)(int yes, void *user);
+  void *user;
+};
+
+static void dialog_end(struct dialog *d, int ok)
+{
+  char text[128];
+  void (*td)(const char *, void *) = d->text_done;
+  void (*cd)(int, void *) = d->confirm_done;
+  void *user = d->user;
+
+  if (d->field)
+    strcpy(text, d->field->text);
+  wm_window_close(d->win);
+  free(d);
+  if (td)
+    td(ok ? text : 0, user);
+  if (cd)
+    cd(ok, user);
+}
+
+static void dialog_ok(struct widget *w)
+{
+  dialog_end(w->user, 1);
+}
+
+static void dialog_cancel(struct widget *w)
+{
+  dialog_end(w->user, 0);
+}
+
+static int dialog_events(struct window *win, const struct event *e)
+{
+  struct ui *ui = win->user;
+
+  if (e->type == EV_CLOSE || (e->type == EV_KEY && e->ascii == 27))
+  {
+    dialog_end(ui->w[ui->n - 1]->user, 0);  /* any widget knows the dialog */
+    return 1;
+  }
+  return 0;
+}
+
+static struct dialog *dialog_new(const char *title, const char *text, int h)
+{
+  struct surface *s = gfx_screen();
+  struct dialog *d = calloc(1, sizeof(*d));
+  int w = text_width(text) + 48;
+  struct ui *ui;
+
+  if (!d)
+    return 0;
+  if (w < 360)
+    w = 360;
+  d->win = wm_window_new((s->w - w) / 2, (s->h - h) / 2, w, h, title);
+  if (!d->win)
+  {
+    free(d);
+    return 0;
+  }
+  d->win->handler = dialog_events;
+  ui = ui_new(d->win);
+  ui_label(ui, 20, 18, text)->user = d;
+  return d;
+}
+
+static struct widget *dialog_buttons(struct dialog *d, const char *ok, const char *cancel)
+{
+  struct ui *ui = d->win->user;
+  int cw = d->win->client->w, ch = d->win->client->h;
+  struct widget *b;
+
+  b = ui_button(ui, cw - 208, ch - 44, 92, 28, ok, dialog_ok);
+  b->user = d;
+  ui_button(ui, cw - 108, ch - 44, 92, 28, cancel, dialog_cancel)->user = d;
+  return b;
+}
+
+struct widget *ui_ask_text(const char *title, const char *prompt, const char *initial,
+                           void (*done)(const char *text, void *user), void *user)
+{
+  struct dialog *d = dialog_new(title, prompt, 150);
+  struct ui *ui;
+
+  if (!d)
+    return 0;
+  ui = d->win->user;
+  d->text_done = done;
+  d->user = user;
+  d->field = ui_textfield(ui, 20, 42, d->win->client->w - 40, dialog_ok);
+  d->field->user = d;
+  ui_set_text(d->field, initial ? initial : "");
+  dialog_buttons(d, "OK", "Cancel");
+  ui_focus(d->field);
+  ui_redraw(ui);
+  return d->field;
+}
+
+struct widget *ui_confirm(const char *title, const char *text,
+                          void (*done)(int yes, void *user), void *user)
+{
+  struct dialog *d = dialog_new(title, text, 120);
+  struct widget *yes;
+
+  if (!d)
+    return 0;
+  d->confirm_done = done;
+  d->user = user;
+  yes = dialog_buttons(d, "Yes", "No");
+  ui_focus(yes);
+  ui_redraw(d->win->user);
+  return yes;
 }

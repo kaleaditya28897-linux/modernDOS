@@ -13,7 +13,7 @@ INT 21h, INT 2Fh, program loading (EXEC) and the DOS version numbers reported by
 | M2 | MDVMM supervisor: 32-bit V86 monitor + DPMI host, multiple DOS sessions (`docs/mdvmm.md`) | done |
 | M3 | UEFI boot with native drivers (GOP display, AHCI/NVMe disks, USB input) | done: DOS boots on UEFI with a virtual BIOS, XMS, DPMI, sessions, AHCI/NVMe disks, USB keyboards (`docs/mdvmm.md`) |
 | M4 | Original desktop GUI + widget toolkit (32-bit DPMI) | done: VBE graphics, mouse, window manager, widget toolkit, desktop shell MDDESK on both boot paths (`docs/gui.md`) |
-| M5 | Native apps: file manager, editor, settings, terminal (DOS session in a window) | planned |
+| M5 | Native apps: file manager, editor, settings, terminal (DOS session in a window) | in progress: file manager (M5.1, `docs/apps.md`) |
 | M6 | Networking: TCP/IP, sockets API, package manager, browser | planned |
 
 ### Trying it

@@ -3,9 +3,11 @@
 
 Usage: deskdrive.py debug.log monitor.sock out.ppm
 Opens About from the launcher, opens Run, runs V86CHK (a DOS program:
-it logs again), returns to the desktop with a key, takes a screenshot,
-and exits through the launcher.
+it logs again), returns to the desktop with a key, takes a screenshot;
+then the file manager: creates, renames, opens and deletes a folder on
+A:; exits through the launcher.
 """
+import os
 import re
 import sys
 import time
@@ -13,9 +15,49 @@ import time
 from guidrive import Mouse, send, text, type_text, wait
 
 
-def point(log, name):
-    found = re.findall(r"MDDESK: (?:widget|item) %s (\d+),(\d+)" % re.escape(name), text(log))
+def point(log, name, kind="(?:widget|item)"):
+    found = re.findall(r"MDDESK: %s %s (\d+),(\d+)" % (kind, re.escape(name)), text(log))
     return int(found[-1][0]), int(found[-1][1])
+
+
+def file_item(log, name):
+    return point(log, name, "fileitem")
+
+
+def files(mouse, sock, log, shot):
+    """The file manager: create, rename, open, leave, delete a folder."""
+    mouse.click(*point(log, "launcher"))
+    time.sleep(0.5)
+    mouse.click(*point(log, "files"))
+    wait(log, "MDDESK: window Files", 10)
+    time.sleep(0.5)
+    mouse.click(*point(log, "files_newfolder"))
+    wait(log, "MDDESK: widget dialogfield", 5)
+    type_text(sock, "Test Folder\n")
+    wait(log, "MDDESK: created", 10)
+    time.sleep(0.5)
+    mouse.click(*file_item(log, "Test Folder"))
+    mouse.click(*point(log, "files_rename"))
+    time.sleep(0.5)
+    for _ in range(len("Test Folder")):
+        send(sock, "sendkey backspace")
+    type_text(sock, "Renamed Dir\n")
+    wait(log, "MDDESK: renamed", 10)
+    time.sleep(1)
+    send(sock, "screendump %s" % shot)
+    time.sleep(1)
+    mouse.click(*file_item(log, "Renamed Dir"))
+    send(sock, "sendkey ret")                   # open the folder
+    wait(log, "MDDESK: files A:\\Renamed Dir\\", 10)
+    time.sleep(0.5)
+    mouse.click(*point(log, "files_up"))
+    time.sleep(1)
+    mouse.click(*file_item(log, "Renamed Dir"))
+    mouse.click(*point(log, "files_delete"))
+    wait(log, "MDDESK: widget confirmyes", 5)
+    time.sleep(0.3)
+    send(sock, "sendkey ret")                   # Yes
+    wait(log, "MDDESK: deleted", 10)
 
 
 def main():
@@ -25,12 +67,12 @@ def main():
     mouse = Mouse(sock, log, "MDDESK")
     time.sleep(1)
     mouse.click(*point(log, "launcher"))
-    wait(log, "MDDESK: item 2", 5)
-    mouse.click(*point(log, "0"))               # About modernDOS
+    wait(log, "MDDESK: item exit", 5)
+    mouse.click(*point(log, "about"))           # About modernDOS
     wait(log, "MDDESK: window About", 5)
     mouse.click(*point(log, "launcher"))
     time.sleep(0.5)
-    mouse.click(*point(log, "1"))               # Run...
+    mouse.click(*point(log, "run"))             # Run...
     wait(log, "MDDESK: widget runbutton", 5)
     mouse.click(*point(log, "runfield"))
     type_text(sock, "A:\\V86CHK")      # full path: DJTEST left the cwd elsewhere
@@ -42,9 +84,11 @@ def main():
     time.sleep(1.5)
     send(sock, "screendump %s" % out)
     time.sleep(1)
+    files(mouse, sock, log, os.path.join(os.path.dirname(out), "files.ppm"))
+    time.sleep(1)
     mouse.click(*point(log, "launcher"))
     time.sleep(0.5)
-    mouse.click(*point(log, "2"))               # Exit to DOS
+    mouse.click(*point(log, "exit"))            # Exit to DOS
     return 0
 
 

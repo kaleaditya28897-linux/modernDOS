@@ -24,8 +24,10 @@ $(B)/font.o: ../mdvmm/core/font.c | $(B)
 $(B)/mdgui.o: $(OBJS)
 	$(CC) -r -nostdlib -o $@ $(OBJS)
 
-$(B)/MDDESK.EXE: desk/desk.c $(B)/mdgui.o lib/mdgui.h
-	$(CC) $(CFLAGS) -s -o $@ desk/desk.c $(B)/mdgui.o
+DESK    = desk/desk.c desk/files.c
+
+$(B)/MDDESK.EXE: $(DESK) desk/desk.h $(B)/mdgui.o lib/mdgui.h
+	$(CC) $(CFLAGS) -s -o $@ $(DESK) $(B)/mdgui.o
 
 clean:
 	rm -rf $(B)

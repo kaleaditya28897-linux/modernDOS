@@ -160,6 +160,8 @@ struct widget {
   int nmenus;
   int disabled;
   ui_action action;                     /* click, toggle, select, Enter, menu */
+  ui_action activate;                   /* list: Enter, double click (else action) */
+  long last_click;
   void *user;
   struct ui *ui;
 };
@@ -182,5 +184,12 @@ int ui_widget_center(const struct widget *w, int *sx, int *sy);   /* screen */
 int ui_popup(int x, int y, const char *const *items, int n, void (*choose)(int item, void *user),
              void *user);
 int ui_popup_open(void);
+/* dialogs (windows in the middle of the screen); Enter is OK, Esc and the
+   close button cancel. ui_ask_text returns the text field, done() gets
+   the text or 0; ui_confirm returns the Yes button, done() gets 1/0 */
+struct widget *ui_ask_text(const char *title, const char *prompt, const char *initial,
+                           void (*done)(const char *text, void *user), void *user);
+struct widget *ui_confirm(const char *title, const char *text,
+                          void (*done)(int yes, void *user), void *user);
 
 #endif

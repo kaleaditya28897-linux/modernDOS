@@ -20,10 +20,9 @@
 #include <pc.h>
 #include <dpmi.h>
 #include <conio.h>
-#include "mdgui.h"
+#include "desk.h"
 
-#define VERSION   "0.1"
-#define PANEL_H   30
+#define VERSION   "0.2"
 #define TASK_W    150
 
 #define C_PANEL      RGB(24, 30, 40)
@@ -32,21 +31,23 @@
 #define C_TASK       RGB(44, 52, 66)
 #define C_TASK_TOP   RGB(32, 128, 136)
 
-static int test_mode, quit, menu_open_now;
+int test_mode;
+static int quit, menu_open_now;
 static char clock_text[8];
 static char last_tasks[256];
 static struct window *about_win, *run_win;
 static struct widget *run_field;
 
-static void tlog(const char *fmt, ...)
+void tlog(const char *fmt, ...)
 {
-  char buf[200], *p;
+  static char buf[8192];
+  char *p;
   va_list ap;
 
   if (!test_mode)
     return;
   va_start(ap, fmt);
-  vsprintf(buf, fmt, ap);
+  vsnprintf(buf, sizeof(buf), fmt, ap);
   va_end(ap);
   for (p = buf; *p; p++)
   {
@@ -64,7 +65,7 @@ static int launcher_w(void)
   return text_width("modernDOS") + 28;
 }
 
-static void panel_damage(void)
+void panel_damage(void)
 {
   wm_damage(0, 0, gfx_screen()->w, PANEL_H);
 }
@@ -103,6 +104,16 @@ static void draw_panel(struct surface *s)
     strcpy(last_tasks, tasks);
     tlog("MDDESK: taskbar%s\n", tasks);
   }
+}
+
+void desk_widget(const char *name, const struct widget *w)
+{
+  int x, y;
+
+  if (!test_mode)
+    return;
+  ui_widget_center(w, &x, &y);
+  tlog("MDDESK: widget %s %d,%d\n", name, x, y);
 }
 
 static void tick_clock(void)
@@ -201,7 +212,7 @@ static void open_about(void)
   panel_damage();
 }
 
-static void run_program(const char *cmd)
+void desk_run(const char *cmd)
 {
   int rc;
 
@@ -237,7 +248,7 @@ static void run_go(struct widget *w)
   panel_damage();
   wm_update();
   if (cmd[0])
-    run_program(cmd);
+    desk_run(cmd);
 }
 
 static void run_cancel(struct widget *w)
@@ -283,7 +294,9 @@ static void open_run(void)
 /* ---------------------------------------------------------------- */
 /* launcher                                                         */
 
-static const char *const launcher_items[] = { "About modernDOS", "Run...", "Exit to DOS" };
+static const char *const launcher_items[] = { "About modernDOS", "Files", "Run...", "Exit to DOS" };
+static const char *const launcher_names[] = { "about", "files", "run", "exit" };
+#define NLAUNCH 4
 
 static void launcher_choose(int item, void *user)
 {
@@ -293,8 +306,9 @@ static void launcher_choose(int item, void *user)
   switch (item)
   {
     case 0: open_about(); break;
-    case 1: open_run(); break;
-    case 2: quit = 1; break;
+    case 1: files_open(0); break;
+    case 2: open_run(); break;
+    case 3: quit = 1; break;
   }
 }
 
@@ -304,9 +318,9 @@ static void open_launcher(void)
 
   menu_open_now = 1;
   panel_damage();
-  ui_popup(6, PANEL_H - 2, launcher_items, 3, launcher_choose, 0);
-  for (i = 0; i < 3; i++)
-    tlog("MDDESK: item %d %d,%d\n", i, 6 + 40, PANEL_H - 2 + 1 + 2 + i * 20 + 10);
+  ui_popup(6, PANEL_H - 2, launcher_items, NLAUNCH, launcher_choose, 0);
+  for (i = 0; i < NLAUNCH; i++)
+    tlog("MDDESK: item %s %d,%d\n", launcher_names[i], 6 + 40, PANEL_H - 2 + 1 + 2 + i * 20 + 10);
 }
 
 static int desk_event(const struct event *e)

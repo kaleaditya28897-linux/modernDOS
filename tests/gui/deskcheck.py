@@ -28,6 +28,14 @@ def main():
          log.count("v86chk: protected mode bit set") >= 2 and "MDDESK: ran A:\\V86CHK exit 0" in log),
         ("back in graphics after the program", "MDDESK: resumed" in log),
         ("Exit to DOS", "MDDESK: exit" in log),
+        ("Files: listed A:\\", bool(re.search(r"MDDESK: files A:\\ \d+:.*kernel\.sys", log, re.I))),
+        ("Files: new folder", "MDDESK: created A:\\Test Folder" in log),
+        ("Files: renamed", "MDDESK: renamed Test Folder to Renamed Dir" in log),
+        ("Files: opened the folder (only ..)", "MDDESK: files A:\\Renamed Dir\\ 1: .." in log),
+        ("Files: deleted", "MDDESK: deleted A:\\Renamed Dir" in log),
+        ("Files: gone from the listing",
+         bool(re.findall(r"MDDESK: files A:\\ \d+:(.*)", log))
+         and "Renamed Dir" not in re.findall(r"MDDESK: files A:\\ \d+:(.*)", log)[-1]),
     ]
     try:
         w, h, px = read_ppm(sys.argv[2])
