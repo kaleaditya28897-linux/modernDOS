@@ -28,7 +28,7 @@ export MTOOLS_SKIP_CHECK=1
 [ -f "$KERNEL" ] || { echo "no $KERNEL: run scripts/mdbuild.sh first"; exit 1; }
 make -s -C "$ROOT/mdvmm"
 make -s -C "$ROOT/gui"
-/opt/djgpp/bin/i586-pc-msdosdjgpp-gcc -O2 -I"$ROOT/gui/lib" -o "$WORK/gfxdemo.exe" \
+/opt/djgpp/bin/i586-pc-msdosdjgpp-gcc -O2 -s -I"$ROOT/gui/lib" -o "$WORK/gfxdemo.exe" \
   "$ROOT/tests/gui/gfxtest.c" "$ROOT/gui/build/mdgui.o"
 
 echo "== BOOT.IMG"

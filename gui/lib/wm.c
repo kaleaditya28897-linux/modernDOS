@@ -93,22 +93,25 @@ void wm_invalidate(struct window *w)
 
 static void client_rect(const struct window *w, struct rect *r)
 {
+  int top = w->popup ? WM_BORDER : WM_TITLE_H;
+
   r->x = w->x + WM_BORDER;
-  r->y = w->y + WM_TITLE_H;
+  r->y = w->y + top;
   r->w = w->w - 2 * WM_BORDER;
-  r->h = w->h - WM_TITLE_H - WM_BORDER;
+  r->h = w->h - top - WM_BORDER;
 }
 
-struct window *wm_window_new(int x, int y, int w, int h, const char *title)
+static struct window *window_new(int x, int y, int w, int h, const char *title, int popup)
 {
   struct window *win;
   struct rect c;
 
-  if (nwin == MAX_WINDOWS || w < 64 || h < WM_TITLE_H + 16)
+  if (nwin == MAX_WINDOWS || w < 16 || h < (popup ? 8 : WM_TITLE_H + 16))
     return 0;
   win = calloc(1, sizeof(*win));
   if (!win)
     return 0;
+  win->popup = popup;
   win->x = x;
   win->y = y;
   win->w = w;
@@ -128,6 +131,18 @@ struct window *wm_window_new(int x, int y, int w, int h, const char *title)
   if (nwin > 1)
     damage_window(wins[nwin - 2]);      /* it loses the focus look */
   return win;
+}
+
+struct window *wm_window_new(int x, int y, int w, int h, const char *title)
+{
+  return window_new(x, y, w, h, title, 0);
+}
+
+/* a popup (menu): frame and client only, on top; a mouse press outside
+   it closes it (the handler gets EV_CLOSE first) */
+struct window *wm_popup_new(int x, int y, int w, int h)
+{
+  return window_new(x, y, w, h, "", 1);
 }
 
 void wm_window_close(struct window *w)
@@ -199,7 +214,13 @@ static void draw_window(struct surface *s, const struct window *w, int active)
   int tw = w->w - CLOSE_W - 20, i;
   char t[64];
 
-  draw_frame(s, w->x, w->y, w->w, w->h, C_BORDER);
+  draw_frame(s, w->x, w->y, w->w, w->h, w->popup ? RGB(120, 128, 140) : C_BORDER);
+  if (w->popup)
+  {
+    client_rect(w, &c);
+    draw_blit(s, c.x, c.y, w->client, 0, 0, c.w, c.h);
+    return;
+  }
   draw_fill(s, w->x + 1, w->y + 1, w->w - 2, WM_TITLE_H - 1, title);
   draw_hline(s, w->x + 1, w->y + 1, w->w - 2, active ? RGB(64, 168, 176) : RGB(78, 86, 102));
   /* title text, cut to fit */
@@ -218,8 +239,12 @@ static void draw_window(struct surface *s, const struct window *w, int active)
 void wm_update(void)
 {
   struct surface *s = gfx_screen();
-  struct window *top = wm_top();
+  struct window *top = 0;
   int i;
+
+  for (i = nwin - 1; i >= 0 && !top; i--)
+    if (wins[i]->visible && !wins[i]->popup)
+      top = wins[i];
 
   if (!dmg_set || !s)
     return;
@@ -289,8 +314,22 @@ int wm_dispatch(const struct event *e)
   {
     case EV_MOUSE_DOWN:
       w = window_at(e->x, e->y);
+      if (wm_top() && wm_top()->popup && w != wm_top())
+      {                                 /* outside a popup: close it */
+        struct window *p = wm_top();
+        struct event c = *e;
+        c.type = EV_CLOSE;
+        if (!deliver(p, &c))
+          wm_window_close(p);
+        return 1;
+      }
       if (!w)
         return 0;
+      if (w->popup)
+      {
+        capture = w;
+        return deliver(w, e);
+      }
       wm_raise(w);
       if (e->button != MB_LEFT || e->y >= w->y + WM_TITLE_H)
       {

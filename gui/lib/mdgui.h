@@ -105,10 +105,13 @@ struct window {
   wm_handler handler;
   void *user;
   int visible;
+  int popup;                            /* no title bar; closes when the
+                                           mouse is pressed outside it */
 };
 
 int wm_init(void);                      /* after gfx_open; draws the desktop */
 struct window *wm_window_new(int x, int y, int w, int h, const char *title);
+struct window *wm_popup_new(int x, int y, int w, int h);
 void wm_window_close(struct window *w);
 void wm_window_move(struct window *w, int x, int y);
 void wm_raise(struct window *w);        /* to the top, with the focus */
@@ -122,5 +125,51 @@ void wm_update(void);                   /* repaint and present damage */
 int wm_dispatch(const struct event *e); /* route one event; 0 if unused */
 void wm_run(int (*idle)(void));         /* until wm_quit; idle may be 0 */
 void wm_quit(void);
+
+/* ui.c - widgets in a window */
+enum { UI_LABEL, UI_BUTTON, UI_CHECK, UI_TEXT, UI_LIST, UI_MENUBAR };
+
+struct ui;
+struct widget;
+typedef void (*ui_action)(struct widget *w);
+
+struct ui_menu {
+  const char *title;
+  const char *const *items;
+  int nitems;
+};
+
+struct widget {
+  int type;
+  int x, y, w, h;                       /* client coordinates */
+  char text[128];                       /* caption; UI_TEXT: the contents */
+  int value;                            /* check: on; list: selection (-1);
+                                           text: caret; menubar: item chosen */
+  int menu;                             /* menubar: menu chosen */
+  int scroll;                           /* list: first row; text: first char */
+  const char *const *items;             /* list items */
+  int nitems;
+  const struct ui_menu *menus;          /* menubar */
+  int nmenus;
+  int disabled;
+  ui_action action;                     /* click, toggle, select, Enter, menu */
+  void *user;
+  struct ui *ui;
+};
+
+struct ui *ui_new(struct window *win);  /* takes the window's handler; the
+                                           old one gets unused events */
+struct widget *ui_label(struct ui *ui, int x, int y, const char *text);
+struct widget *ui_button(struct ui *ui, int x, int y, int w, int h, const char *text, ui_action a);
+struct widget *ui_check(struct ui *ui, int x, int y, const char *text, ui_action a);
+struct widget *ui_textfield(struct ui *ui, int x, int y, int w, ui_action a);
+struct widget *ui_list(struct ui *ui, int x, int y, int w, int h, const char *const *items, int n,
+                       ui_action a);
+struct widget *ui_menubar(struct ui *ui, const struct ui_menu *menus, int n, ui_action a);
+void ui_set_text(struct widget *w, const char *text);
+void ui_focus(struct widget *w);
+struct widget *ui_focused(struct ui *ui);
+void ui_redraw(struct ui *ui);
+int ui_widget_center(const struct widget *w, int *sx, int *sy);   /* screen */
 
 #endif

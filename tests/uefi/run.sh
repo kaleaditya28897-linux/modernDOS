@@ -48,11 +48,12 @@ ia16-elf-gcc -mcmodel=small -Os -o "$WORK/lfntest.exe" "$ROOT/tests/lfn/lfntest.
 ia16-elf-gcc -mcmodel=small -Os -o "$WORK/sesstest.exe" "$ROOT/tests/mdvmm/sesstest.c" -li86
 ia16-elf-gcc -mcmodel=small -Os -o "$WORK/disktest.exe" "$HERE/disktest.c" -li86
 DJGPP=/opt/djgpp/bin/i586-pc-msdosdjgpp-gcc
-"$DJGPP" -O2 -o "$WORK/djtest.exe" "$ROOT/tests/lfn/djtest.c"
-"$DJGPP" -O2 -o "$WORK/dpmitest.exe" "$ROOT/tests/mdvmm/dpmitest.c"
-"$DJGPP" -O2 -I"$ROOT/gui/lib" -o "$WORK/gfxtest.exe" "$ROOT/tests/gui/gfxtest.c" "$ROOT/gui/build/mdgui.o"
-"$DJGPP" -O2 -I"$ROOT/gui/lib" -o "$WORK/mousetest.exe" "$ROOT/tests/gui/mousetest.c" "$ROOT/gui/build/mdgui.o"
-"$DJGPP" -O2 -I"$ROOT/gui/lib" -o "$WORK/wmtest.exe" "$ROOT/tests/gui/wmtest.c" "$ROOT/gui/build/mdgui.o"
+"$DJGPP" -O2 -s -o "$WORK/djtest.exe" "$ROOT/tests/lfn/djtest.c"
+"$DJGPP" -O2 -s -o "$WORK/dpmitest.exe" "$ROOT/tests/mdvmm/dpmitest.c"
+"$DJGPP" -O2 -s -I"$ROOT/gui/lib" -o "$WORK/gfxtest.exe" "$ROOT/tests/gui/gfxtest.c" "$ROOT/gui/build/mdgui.o"
+"$DJGPP" -O2 -s -I"$ROOT/gui/lib" -o "$WORK/mousetest.exe" "$ROOT/tests/gui/mousetest.c" "$ROOT/gui/build/mdgui.o"
+"$DJGPP" -O2 -s -I"$ROOT/gui/lib" -o "$WORK/wmtest.exe" "$ROOT/tests/gui/wmtest.c" "$ROOT/gui/build/mdgui.o"
+"$DJGPP" -O2 -s -I"$ROOT/gui/lib" -o "$WORK/uitest.exe" "$ROOT/tests/gui/uitest.c" "$ROOT/gui/build/mdgui.o"
 
 echo "== building the DOS boot image"
 cd "$WORK"
@@ -81,6 +82,8 @@ IF ERRORLEVEL 1 GOTO END
 A:\MOUSETEST.EXE
 IF ERRORLEVEL 1 GOTO END
 A:\WMTEST.EXE
+IF ERRORLEVEL 1 GOTO END
+A:\UITEST.EXE
 IF ERRORLEVEL 1 GOTO END
 DIR C:\
 A:\DISKTEST.EXE C
@@ -123,6 +126,7 @@ mcopy -i boot.img sesstest.exe ::SESSTEST.EXE
 mcopy -i boot.img gfxtest.exe ::GFXTEST.EXE
 mcopy -i boot.img mousetest.exe ::MOUSETEST.EXE
 mcopy -i boot.img wmtest.exe ::WMTEST.EXE
+mcopy -i boot.img uitest.exe ::UITEST.EXE
 mcopy -i boot.img bg.bat ::BG.BAT
 mcopy -i boot.img disktest.exe ::DISKTEST.EXE
 
@@ -233,6 +237,8 @@ python3 "$ROOT/tests/gui/mousedrive.py" debug.log mon.sock mouse.ppm &
 mouse_drv=$!
 (cd "$ROOT/tests/gui" && PYTHONDONTWRITEBYTECODE=1 exec python3 wmdrive.py "$WORK/debug.log" "$WORK/mon.sock" "$WORK/wm.ppm") &
 wm_drv=$!
+(cd "$ROOT/tests/gui" && PYTHONDONTWRITEBYTECODE=1 exec python3 uidrive.py "$WORK/debug.log" "$WORK/mon.sock" "$WORK/ui.ppm") &
+ui_drv=$!
 timeout --foreground 300 qemu-system-x86_64 -m 256 -bios "$OVMF" \
   -drive file=esp.img,format=raw,if=ide -net none -display none \
   -device ahci,id=ahci -drive id=hd,file=hd.img,format=raw,if=none \
@@ -242,7 +248,7 @@ timeout --foreground 300 qemu-system-x86_64 -m 256 -bios "$OVMF" \
   -device qemu-xhci,id=xhci -device usb-kbd,bus=xhci.0 -device usb-mouse,bus=xhci.0 \
   -debugcon file:debug.log -serial file:serial.log -no-reboot \
   -monitor unix:mon.sock,server,nowait $QEMU_EXTRA </dev/null || true
-kill $shot_gfx $mouse_drv $wm_drv 2>/dev/null || true
+kill $shot_gfx $mouse_drv $wm_drv $ui_drv 2>/dev/null || true
 kill $keys_pid 2>/dev/null || true
 [ -n "$SCREEN" ] && wait $shot_pid 2>/dev/null || true
 echo "-- debug console"
@@ -295,5 +301,6 @@ check_disk nvme.img D "NVMe disk"
 python3 "$ROOT/tests/gui/gfxcheck.py" gfx.ppm debug.log || fail=1
 python3 "$ROOT/tests/gui/mousecheck.py" debug.log mouse.ppm || fail=1
 python3 "$ROOT/tests/gui/wmcheck.py" debug.log wm.ppm || fail=1
+PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT/tests/gui/uicheck.py" debug.log ui.ppm || fail=1
 [ -n "$SHOTS" ] && cp ./*.ppm "$SHOTS"/ 2>/dev/null || true    # keep the screenshots
 if [ $fail = 0 ]; then echo "UEFI TEST: success"; else echo "UEFI TEST: failure"; exit 1; fi
