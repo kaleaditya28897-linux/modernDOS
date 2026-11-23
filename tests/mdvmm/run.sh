@@ -37,6 +37,7 @@ DJGPP=/opt/djgpp/bin/i586-pc-msdosdjgpp-gcc
 "$DJGPP" -O2 -o "$WORK/dpmitest.exe" "$HERE/dpmitest.c"
 "$DJGPP" -O2 -I"$ROOT/gui/lib" -o "$WORK/gfxtest.exe" "$ROOT/tests/gui/gfxtest.c" "$ROOT/gui/build/mdgui.o"
 "$DJGPP" -O2 -I"$ROOT/gui/lib" -o "$WORK/mousetest.exe" "$ROOT/tests/gui/mousetest.c" "$ROOT/gui/build/mdgui.o"
+"$DJGPP" -O2 -I"$ROOT/gui/lib" -o "$WORK/wmtest.exe" "$ROOT/tests/gui/wmtest.c" "$ROOT/gui/build/mdgui.o"
 
 echo "== building boot floppy"
 cd "$WORK"
@@ -65,6 +66,8 @@ IF ERRORLEVEL 1 GOTO END
 A:\GFXTEST.EXE
 IF ERRORLEVEL 1 GOTO END
 A:\MOUSETEST.EXE
+IF ERRORLEVEL 1 GOTO END
+A:\WMTEST.EXE
 IF ERRORLEVEL 1 GOTO END
 ECHO success>A:\RESULT.TXT
 :END
@@ -97,6 +100,7 @@ mcopy -i disk.img dpmitest.exe ::DPMITEST.EXE
 mcopy -i disk.img sesstest.exe ::SESSTEST.EXE
 mcopy -i disk.img gfxtest.exe ::GFXTEST.EXE
 mcopy -i disk.img mousetest.exe ::MOUSETEST.EXE
+mcopy -i disk.img wmtest.exe ::WMTEST.EXE
 mcopy -i disk.img /opt/fdos/bin/ctmouse.exe ::CTMOUSE.EXE
 mcopy -i disk.img bg.bat ::BG.BAT
 printf 'hello from linux\n' > linux.txt
@@ -136,11 +140,13 @@ python3 "$ROOT/tests/gui/gfxshot.py" debug.log mon.sock gfx.ppm &
 shot_gfx=$!
 python3 "$ROOT/tests/gui/mousedrive.py" debug.log mon.sock mouse.ppm &
 mouse_drv=$!
+(cd "$ROOT/tests/gui" && PYTHONDONTWRITEBYTECODE=1 exec python3 wmdrive.py "$WORK/debug.log" "$WORK/mon.sock" "$WORK/wm.ppm") &
+wm_drv=$!
 timeout --foreground 300 "$QEMU" -m 64 \
   -drive file=disk.img,format=raw,if=floppy -display none \
   -debugcon file:debug.log -no-reboot \
   -monitor unix:mon.sock,server,nowait $QEMU_EXTRA </dev/null || true
-kill $shot_gfx $mouse_drv 2>/dev/null || true
+kill $shot_gfx $mouse_drv $wm_drv 2>/dev/null || true
 kill $keys_pid 2>/dev/null || true
 sed 's/\r$//' debug.log
 
@@ -162,6 +168,7 @@ if fsck.fat -n disk.img >/dev/null; then echo "  ok   file system clean"; else
 
 python3 "$ROOT/tests/gui/gfxcheck.py" gfx.ppm debug.log || fail=1
 python3 "$ROOT/tests/gui/mousecheck.py" debug.log mouse.ppm loose || fail=1   # CTMOUSE accelerates
-[ -n "$GFXSHOT" ] && cp gfx.ppm "$GFXSHOT" 2>/dev/null || true
+python3 "$ROOT/tests/gui/wmcheck.py" debug.log wm.ppm || fail=1
+[ -n "$SHOTS" ] && cp ./*.ppm "$SHOTS"/ 2>/dev/null || true    # keep the screenshots
 if [ $fail = 0 ]; then echo "MDVMM TEST: success"; else echo "MDVMM TEST: failure"; fi
 exit $fail

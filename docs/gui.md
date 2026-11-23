@@ -11,7 +11,7 @@ provides the graphics mode.
 |---|---|
 | M4.1 graphics foundation | working: VBE linear framebuffer (32 bpp) on both boot paths, `mdgui` library: back buffer, clipped drawing, 8x16 text, present |
 | M4.2 mouse and events | working: INT 33h on both boot paths (UEFI: virtual BIOS driver, USB mice; DOS: CTMOUSE), `mdgui` events and mouse cursor |
-| M4.3 window system | planned: windows, z-order, moving, damage repaint |
+| M4.3 window system | working: windows with frames, title bars and close buttons, z-order, focus, moving, damage repaint (`wm.c`) |
 | M4.4 widget toolkit | planned: buttons, text fields, lists, menus, layout, theme |
 | M4.5 desktop shell | planned: launcher, clock, starting DOS programs |
 
@@ -69,6 +69,27 @@ Mouse drivers:
   the console. Functions 00h-08h, 0Bh, 0Fh, 1Bh, 21h, 24h; not yet the
   event handler (0Ch) or PS/2 mice.
 
+## Window manager
+
+`gui/lib/wm.c`. The desktop is one program; all its windows live in it,
+much like the Windows 3.x GUI ran in one address space.
+
+- A window (`struct window`) has an outer rectangle, a title, and a
+  retained client surface the program draws into, then calls
+  `wm_invalidate()`. `wm_window_new()`, `wm_window_close()`,
+  `wm_window_move()`, `wm_raise()`.
+- Repaint: changes add to a damaged rectangle (`wm_damage()`);
+  `wm_update()` draws the desktop and the windows bottom to top, clipped
+  to it, and presents only that area.
+- Events (`wm_dispatch()`, or `wm_run()` as the whole loop): a mouse
+  press raises and focuses the window under the pointer; on the title bar
+  it starts a move, on the close button it sends `EV_CLOSE` (the window
+  closes unless the handler takes it); elsewhere the window gets the
+  event in client coordinates and keeps the mouse until the button is
+  released. Keys go to the focused (top) window.
+- Look: slate title bars, teal for the active window, a red close button,
+  1-pixel dark frames, a dark blue-grey gradient desktop.
+
 ## Testing
 
 `tests/gui/gfxtest.c` (GFXTEST) runs in the MDVMM test (DOS boot) and
@@ -76,10 +97,18 @@ the UEFI test. It draws a known pattern, logs `GFXTEST: drawn WxH`, and
 returns to text mode after 3 seconds. `tests/gui/gfxshot.py` takes a
 QEMU screendump when the pattern is up, `tests/gui/gfxcheck.py` checks
 pixels: the corner boxes, the background, clipping, the gradient.
-`GFXSHOT=file.ppm` keeps the screenshot.
+`SHOTS=dir` keeps the screenshots (gfx, mouse, wm .ppm).
 
 `tests/gui/mousetest.c` (MOUSETEST) shows the cursor and logs clicks;
 `tests/gui/mousedrive.py` moves the mouse by (+120, +60) through the QEMU
 monitor, clicks, takes a screenshot and presses q; `mousecheck.py`
 checks the click position (exact with the virtual BIOS driver, direction
 only with CTMOUSE), the orange square and the cursor in the screenshot.
+
+`tests/gui/wmtest.c` (WMTEST) opens three overlapping windows.
+`wmdrive.py` drags one by its title bar and clicks another to raise it;
+it steers the pointer closed loop by the positions WMTEST logs, because
+QEMU only sends relative motion and CTMOUSE accelerates it. `wmcheck.py`
+checks the final layout and z-order from the log and pixels in the
+screenshot (the raised window covers the overlap, the moved window's old
+place shows the desktop).

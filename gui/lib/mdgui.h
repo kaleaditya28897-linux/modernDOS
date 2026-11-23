@@ -88,4 +88,39 @@ int input_poll(struct event *e);        /* 1 if *e is an event */
 void input_wait(struct event *e);       /* until there is one; idles */
 void input_close(void);
 
+/* wm.c - windows: frames, z-order, focus, moving, damage repaint */
+#define WM_TITLE_H 24
+#define WM_BORDER  1
+
+struct window;
+/* event handler: mouse coordinates are client coordinates; return 1 if
+   handled. EV_CLOSE when the close button is clicked (default: close) */
+enum { EV_CLOSE = 100 };
+typedef int (*wm_handler)(struct window *w, const struct event *e);
+
+struct window {
+  int x, y, w, h;                       /* outer rectangle, screen coords */
+  char title[64];
+  struct surface *client;               /* contents, drawn by the program */
+  wm_handler handler;
+  void *user;
+  int visible;
+};
+
+int wm_init(void);                      /* after gfx_open; draws the desktop */
+struct window *wm_window_new(int x, int y, int w, int h, const char *title);
+void wm_window_close(struct window *w);
+void wm_window_move(struct window *w, int x, int y);
+void wm_raise(struct window *w);        /* to the top, with the focus */
+struct window *wm_focus(void);
+struct window *wm_top(void);
+int wm_count(void);
+struct window *wm_window(int i);        /* bottom (0) to top */
+void wm_invalidate(struct window *w);   /* client contents changed */
+void wm_damage(int x, int y, int w, int h);
+void wm_update(void);                   /* repaint and present damage */
+int wm_dispatch(const struct event *e); /* route one event; 0 if unused */
+void wm_run(int (*idle)(void));         /* until wm_quit; idle may be 0 */
+void wm_quit(void);
+
 #endif
