@@ -14,5 +14,6 @@ void desk_widget(const char *name, const struct widget *w);   /* test log */
 
 /* applications */
 void files_open(const char *path);      /* file manager */
+void editor_open(const char *path);     /* text editor; 0: a new text */
 
 #endif

@@ -294,9 +294,10 @@ static void open_run(void)
 /* ---------------------------------------------------------------- */
 /* launcher                                                         */
 
-static const char *const launcher_items[] = { "About modernDOS", "Files", "Run...", "Exit to DOS" };
-static const char *const launcher_names[] = { "about", "files", "run", "exit" };
-#define NLAUNCH 4
+static const char *const launcher_items[] = { "About modernDOS", "Files", "Editor", "Run...",
+                                             "Exit to DOS" };
+static const char *const launcher_names[] = { "about", "files", "editor", "run", "exit" };
+#define NLAUNCH 5
 
 static void launcher_choose(int item, void *user)
 {
@@ -307,8 +308,9 @@ static void launcher_choose(int item, void *user)
   {
     case 0: open_about(); break;
     case 1: files_open(0); break;
-    case 2: open_run(); break;
-    case 3: quit = 1; break;
+    case 2: editor_open(0); break;
+    case 3: open_run(); break;
+    case 4: quit = 1; break;
   }
 }
 

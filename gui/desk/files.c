@@ -5,7 +5,8 @@
  * or a drive such as C:), buttons (Up, Refresh, New folder, Rename,
  * Delete, Open) and the folder's contents, folders first, with long file
  * names, sizes and dates. Enter or a double click opens: a folder is
- * entered, a program (.EXE .COM .BAT) is run through the desktop.
+ * entered, a program (.EXE .COM .BAT) is run through the desktop, other
+ * files open in the editor.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -232,7 +233,7 @@ static void open_entry(struct files *f)
     desk_run(cmd);
   }
   else
-    status(f, "No application for this file yet.");
+    editor_open(full);
 }
 
 /* ---------------------------------------------------------------- */

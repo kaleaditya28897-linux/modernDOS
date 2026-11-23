@@ -160,6 +160,382 @@ int ui_widget_center(const struct widget *w, int *sx, int *sy)
   return 0;
 }
 
+
+/* ---------------------------------------------------------------- */
+/* multi-line text (UI_EDIT)                                        */
+
+#define TAB_SPACES 4
+
+struct ebuf {
+  char **line;
+  int *len;
+  int n, cap;
+  int cl, cc;                           /* caret */
+  int top, left;                        /* first visible line, column */
+  int modified;
+};
+
+static int eb_grow(struct ebuf *b, int n)
+{
+  if (n <= b->cap)
+    return 0;
+  {
+    int cap = b->cap ? b->cap * 2 : 64;
+    char **l;
+    int *ln;
+    while (cap < n)
+      cap *= 2;
+    l = realloc(b->line, cap * sizeof(char *));
+    if (!l)
+      return -1;
+    b->line = l;
+    ln = realloc(b->len, cap * sizeof(int));
+    if (!ln)
+      return -1;
+    b->len = ln;
+    b->cap = cap;
+  }
+  return 0;
+}
+
+static void eb_clear(struct ebuf *b)
+{
+  int i;
+  for (i = 0; i < b->n; i++)
+    free(b->line[i]);
+  b->n = 0;
+}
+
+/* insert a line (copy of s, len) at i */
+static int eb_insert_line(struct ebuf *b, int i, const char *s, int len)
+{
+  char *l;
+
+  if (eb_grow(b, b->n + 1) || !(l = malloc(len + 1)))
+    return -1;
+  memcpy(l, s, len);
+  l[len] = 0;
+  memmove(b->line + i + 1, b->line + i, (b->n - i) * sizeof(char *));
+  memmove(b->len + i + 1, b->len + i, (b->n - i) * sizeof(int));
+  b->line[i] = l;
+  b->len[i] = len;
+  b->n++;
+  return 0;
+}
+
+static void eb_delete_line(struct ebuf *b, int i)
+{
+  free(b->line[i]);
+  memmove(b->line + i, b->line + i + 1, (b->n - i - 1) * sizeof(char *));
+  memmove(b->len + i, b->len + i + 1, (b->n - i - 1) * sizeof(int));
+  b->n--;
+}
+
+/* replace line i's text */
+static int eb_set_line(struct ebuf *b, int i, const char *s, int len)
+{
+  char *l = malloc(len + 1);
+  if (!l)
+    return -1;
+  memcpy(l, s, len);
+  l[len] = 0;
+  free(b->line[i]);
+  b->line[i] = l;
+  b->len[i] = len;
+  return 0;
+}
+
+struct widget *ui_edit(struct ui *ui, int x, int y, int w, int h, ui_action a)
+{
+  struct widget *wd = add(ui, UI_EDIT, x, y, w, h, 0);
+  struct ebuf *b;
+
+  if (!wd)
+    return 0;
+  b = calloc(1, sizeof(*b));
+  if (!b || eb_insert_line(b, 0, "", 0))
+    return 0;
+  wd->data = b;
+  wd->action = a;
+  return wd;
+}
+
+int edit_set_text(struct widget *w, const char *text, long len)
+{
+  struct ebuf *b = w->data;
+  long i, start = 0;
+
+  eb_clear(b);
+  for (i = 0; i <= len; i++)
+    if (i == len || text[i] == '\n')
+    {
+      long end = i;
+      if (end > start && text[end - 1] == '\r')
+        end--;
+      if (i == len && start == len && b->n)
+        break;                          /* text ends with a newline */
+      if (eb_insert_line(b, b->n, text + start, (int)(end - start)))
+        return -1;
+      start = i + 1;
+    }
+  if (!b->n && eb_insert_line(b, 0, "", 0))
+    return -1;
+  b->cl = b->cc = b->top = b->left = 0;
+  b->modified = 0;
+  ui_redraw(w->ui);
+  return 0;
+}
+
+char *edit_get_text(struct widget *w, long *len)
+{
+  struct ebuf *b = w->data;
+  long total = 0;
+  char *t, *p;
+  int i;
+
+  for (i = 0; i < b->n; i++)
+    total += b->len[i] + 2;
+  t = malloc(total + 1);
+  if (!t)
+    return 0;
+  for (p = t, i = 0; i < b->n; i++)
+  {
+    memcpy(p, b->line[i], b->len[i]);
+    p += b->len[i];
+    *p++ = '\r';
+    *p++ = '\n';
+  }
+  *p = 0;
+  if (len)
+    *len = total;
+  return t;
+}
+
+int edit_modified(struct widget *w)
+{
+  return ((struct ebuf *)w->data)->modified;
+}
+
+void edit_set_modified(struct widget *w, int m)
+{
+  ((struct ebuf *)w->data)->modified = m;
+}
+
+void edit_caret(struct widget *w, int *line, int *col)
+{
+  struct ebuf *b = w->data;
+  *line = b->cl + 1;
+  *col = b->cc + 1;
+}
+
+int edit_lines(struct widget *w)
+{
+  return ((struct ebuf *)w->data)->n;
+}
+
+static int edit_rows(const struct widget *w)
+{
+  return (w->h - 6) / FONT_H;
+}
+
+static int edit_cols(const struct widget *w)
+{
+  return (w->w - 10 - SCROLL_W) / FONT_W;
+}
+
+/* keep the caret in the text and on the screen */
+static void edit_fix(struct widget *w)
+{
+  struct ebuf *b = w->data;
+  int rows = edit_rows(w), cols = edit_cols(w);
+
+  if (b->cl < 0) b->cl = 0;
+  if (b->cl >= b->n) b->cl = b->n - 1;
+  if (b->cc < 0) b->cc = 0;
+  if (b->cc > b->len[b->cl]) b->cc = b->len[b->cl];
+  if (b->cl < b->top) b->top = b->cl;
+  if (b->cl >= b->top + rows) b->top = b->cl - rows + 1;
+  if (b->cc < b->left) b->left = b->cc;
+  if (b->cc >= b->left + cols) b->left = b->cc - cols + 1;
+}
+
+static void edit_insert(struct ebuf *b, const char *s, int n)
+{
+  char *l = malloc(b->len[b->cl] + n + 1);
+
+  if (!l)
+    return;
+  memcpy(l, b->line[b->cl], b->cc);
+  memcpy(l + b->cc, s, n);
+  memcpy(l + b->cc + n, b->line[b->cl] + b->cc, b->len[b->cl] - b->cc + 1);
+  free(b->line[b->cl]);
+  b->line[b->cl] = l;
+  b->len[b->cl] += n;
+  b->cc += n;
+  b->modified = 1;
+}
+
+static int edit_key(struct widget *w, const struct event *e)
+{
+  struct ebuf *b = w->data;
+  int ctrl = (e->shift & 4) != 0, rows = edit_rows(w);
+  char *l = b->line[b->cl];
+
+  switch (e->scan)
+  {
+    case 0x48: b->cl--; break;                             /* up */
+    case 0x50: b->cl++; break;                             /* down */
+    case 0x4b:                                             /* left */
+      if (b->cc > 0) b->cc--;
+      else if (b->cl > 0) { b->cl--; b->cc = b->len[b->cl]; }
+      break;
+    case 0x4d:                                             /* right */
+      if (b->cc < b->len[b->cl]) b->cc++;
+      else if (b->cl < b->n - 1) { b->cl++; b->cc = 0; }
+      break;
+    case 0x47: case 0x77: if (ctrl || e->scan == 0x77) b->cl = 0; b->cc = 0; break;  /* home */
+    case 0x4f: case 0x75:                                  /* end */
+      if (ctrl || e->scan == 0x75) b->cl = b->n - 1;
+      b->cc = b->len[b->cl];
+      break;
+    case 0x49: b->cl -= rows; b->top -= rows; if (b->top < 0) b->top = 0; break;   /* pgup */
+    case 0x51: b->cl += rows; b->top += rows; break;       /* pgdn */
+    case 0x53:                                             /* delete */
+      if (b->cc < b->len[b->cl])
+      {
+        memmove(l + b->cc, l + b->cc + 1, b->len[b->cl] - b->cc);
+        b->len[b->cl]--;
+        b->modified = 1;
+      }
+      else if (b->cl < b->n - 1)                           /* join the next line */
+      {
+        int n = b->len[b->cl] + b->len[b->cl + 1];
+        char *j = malloc(n + 1);
+        if (j)
+        {
+          memcpy(j, l, b->len[b->cl]);
+          memcpy(j + b->len[b->cl], b->line[b->cl + 1], b->len[b->cl + 1] + 1);
+          eb_set_line(b, b->cl, j, n);
+          free(j);
+          eb_delete_line(b, b->cl + 1);
+          b->modified = 1;
+        }
+      }
+      break;
+    default:
+      if (e->ascii == 8)                                   /* backspace */
+      {
+        if (b->cc > 0)
+        {
+          memmove(l + b->cc - 1, l + b->cc, b->len[b->cl] - b->cc + 1);
+          b->len[b->cl]--;
+          b->cc--;
+          b->modified = 1;
+        }
+        else if (b->cl > 0)
+        {
+          int pl = b->len[b->cl - 1], n = pl + b->len[b->cl];
+          char *j = malloc(n + 1);
+          if (j)
+          {
+            memcpy(j, b->line[b->cl - 1], pl);
+            memcpy(j + pl, l, b->len[b->cl] + 1);
+            eb_set_line(b, b->cl - 1, j, n);
+            free(j);
+            eb_delete_line(b, b->cl);
+            b->cl--;
+            b->cc = pl;
+            b->modified = 1;
+          }
+        }
+      }
+      else if (e->ascii == 13)                             /* split the line */
+      {
+        if (!eb_insert_line(b, b->cl + 1, l + b->cc, b->len[b->cl] - b->cc))
+        {
+          l = b->line[b->cl];
+          l[b->cc] = 0;
+          b->len[b->cl] = b->cc;
+          b->cl++;
+          b->cc = 0;
+          b->modified = 1;
+        }
+      }
+      else if (e->ascii == 9)
+        edit_insert(b, "    ", TAB_SPACES - b->cc % TAB_SPACES);
+      else if (e->ascii >= 32 && e->ascii != 127)
+      {
+        char c = (char)e->ascii;
+        edit_insert(b, &c, 1);
+      }
+      else
+        return 0;
+  }
+  edit_fix(w);
+  if (w->action)
+    w->action(w);
+  return 1;
+}
+
+static void edit_click(struct widget *w, const struct event *e)
+{
+  struct ebuf *b = w->data;
+  int rows = edit_rows(w);
+
+  if (e->x >= w->x + w->w - SCROLL_W - 1)               /* scroll bar: page */
+  {
+    b->top += e->y < w->y + w->h / 2 ? -rows : rows;
+    if (b->top > b->n - rows) b->top = b->n - rows;
+    if (b->top < 0) b->top = 0;
+    b->cl = b->top;
+  }
+  else
+  {
+    b->cl = b->top + (e->y - w->y - 3) / FONT_H;
+    if (b->cl >= b->n) b->cl = b->n - 1;
+    b->cc = b->left + (e->x - w->x - 5 + FONT_W / 2) / FONT_W;
+  }
+  edit_fix(w);
+  if (w->action)
+    w->action(w);
+}
+
+static void edit_draw(struct surface *s, struct widget *w, int focused)
+{
+  struct ebuf *b = w->data;
+  int rows = edit_rows(w), cols = edit_cols(w), i;
+  char part[256];
+
+  draw_fill(s, w->x, w->y, w->w, w->h, C_FIELD);
+  draw_frame(s, w->x, w->y, w->w, w->h, focused ? C_ACCENT : C_LINE);
+  surface_clip(s, w->x + 1, w->y + 1, w->w - SCROLL_W - 3, w->h - 2);
+  for (i = 0; i < rows && b->top + i < b->n; i++)
+  {
+    int ln = b->top + i, y = w->y + 3 + i * FONT_H, n = b->len[ln] - b->left;
+    if (n > cols + 1)
+      n = cols + 1;
+    if (n > (int)sizeof(part) - 1)
+      n = sizeof(part) - 1;
+    if (n < 0)
+      n = 0;
+    memcpy(part, b->line[ln] + (b->left < b->len[ln] ? b->left : b->len[ln]), n);
+    part[n] = 0;
+    if (ln == b->cl && focused)
+      draw_fill(s, w->x + 2, y, w->w - SCROLL_W - 5, FONT_H, RGB(238, 246, 247));
+    draw_text(s, w->x + 5, y, part, C_INK, TEXT_TRANSPARENT);
+    if (ln == b->cl && focused)
+      draw_vline(s, w->x + 5 + (b->cc - b->left) * FONT_W, y, FONT_H, C_INK);
+  }
+  surface_noclip(s);
+  {                                     /* scroll bar */
+    int track = w->h - 2, th = b->n > rows ? track * rows / b->n : track, ty0;
+    if (th < 12) th = 12;
+    ty0 = w->y + 1 + (b->n > rows ? (track - th) * b->top / (b->n - rows) : 0);
+    draw_fill(s, w->x + w->w - SCROLL_W - 1, w->y + 1, SCROLL_W, track, RGB(232, 235, 240));
+    draw_fill(s, w->x + w->w - SCROLL_W + 1, ty0 + 1, SCROLL_W - 4, th - 2, RGB(176, 184, 196));
+  }
+}
+
 /* ---------------------------------------------------------------- */
 /* drawing                                                          */
 
@@ -251,6 +627,9 @@ static void draw_widget(struct surface *s, struct widget *w, int focused)
       }
       break;
     }
+    case UI_EDIT:
+      edit_draw(s, w, focused);
+      break;
     case UI_MENUBAR:
       draw_fill(s, 0, 0, s->w, MENUBAR_H, C_BAR);
       draw_hline(s, 0, MENUBAR_H - 1, s->w, RGB(206, 212, 220));
@@ -526,6 +905,8 @@ static int key(struct ui *ui, const struct event *e)
 {
   struct widget *w = ui->focus;
 
+  if (w && w->type == UI_EDIT && e->ascii == 9)        /* Tab: the editor's */
+    return edit_key(w, e);
   if (e->ascii == 9 || (e->scan == 0x0f && !e->ascii))  /* Tab, Shift+Tab */
   {
     focus_next(ui, e->ascii != 9 || (e->shift & 3));
@@ -564,6 +945,8 @@ static int key(struct ui *ui, const struct event *e)
       break;
     case UI_TEXT:
       return text_key(w, e);
+    case UI_EDIT:
+      return edit_key(w, e);
   }
   return 0;
 }
@@ -596,6 +979,9 @@ static int mouse_down(struct ui *ui, const struct event *e)
     case UI_CHECK:
       w->value = !w->value;
       act(w);
+      break;
+    case UI_EDIT:
+      edit_click(w, e);
       break;
     case UI_TEXT:
     {

@@ -33,6 +33,11 @@ def main():
         ("Files: renamed", "MDDESK: renamed Test Folder to Renamed Dir" in log),
         ("Files: opened the folder (only ..)", "MDDESK: files A:\\Renamed Dir\\ 1: .." in log),
         ("Files: deleted", "MDDESK: deleted A:\\Renamed Dir" in log),
+        ("Editor: opened from Files", "MDDESK: editor opened A:\\Created On Linux.txt, 1 lines" in log),
+        ("Editor: saved with Ctrl+S (53 bytes, CRLF)",
+         "MDDESK: editor saved A:\\Created On Linux.txt, 53 bytes: hello from linux - edited in modernDOS"
+         in log),
+        ("Editor: closed", "MDDESK: editor closed" in log),
         ("Files: gone from the listing",
          bool(re.findall(r"MDDESK: files A:\\ \d+:(.*)", log))
          and "Renamed Dir" not in re.findall(r"MDDESK: files A:\\ \d+:(.*)", log)[-1]),

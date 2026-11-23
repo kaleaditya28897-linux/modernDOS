@@ -5,7 +5,8 @@ Usage: deskdrive.py debug.log monitor.sock out.ppm
 Opens About from the launcher, opens Run, runs V86CHK (a DOS program:
 it logs again), returns to the desktop with a key, takes a screenshot;
 then the file manager: creates, renames, opens and deletes a folder on
-A:; exits through the launcher.
+A:; then opens A:\Created On Linux.txt in the editor from Files, adds to
+it, saves with Ctrl+S, closes; exits through the launcher.
 """
 import os
 import re
@@ -60,6 +61,26 @@ def files(mouse, sock, log, shot):
     wait(log, "MDDESK: deleted", 10)
 
 
+def editor(mouse, sock, log, shot):
+    """Open a text file from Files in the editor, change it, save, close."""
+    mouse.click(*file_item(log, "Created On Linux.txt"))
+    send(sock, "sendkey ret")
+    if not wait(log, "MDDESK: editor opened", 10):
+        return
+    m = re.findall(r"MDDESK: window Editor at (\d+),(\d+)", text(log))[-1]
+    time.sleep(0.5)
+    send(sock, "sendkey end")
+    type_text(sock, " - edited in modernDOS\nsecond line")
+    send(sock, "sendkey ctrl-s")
+    wait(log, "MDDESK: editor saved", 10)
+    time.sleep(1)
+    send(sock, "screendump %s" % shot)
+    time.sleep(1)
+    x, y = int(m[0]), int(m[1])
+    mouse.click(x + 660 - 22 + 9, y + 12)       # the close button
+    wait(log, "MDDESK: editor closed", 10)
+
+
 def main():
     log, sock, out = sys.argv[1:4]
     if not wait(log, "MDDESK: ready", 290):
@@ -85,6 +106,8 @@ def main():
     send(sock, "screendump %s" % out)
     time.sleep(1)
     files(mouse, sock, log, os.path.join(os.path.dirname(out), "files.ppm"))
+    time.sleep(1)
+    editor(mouse, sock, log, os.path.join(os.path.dirname(out), "editor.ppm"))
     time.sleep(1)
     mouse.click(*point(log, "launcher"))
     time.sleep(0.5)

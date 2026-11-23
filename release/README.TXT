@@ -31,8 +31,8 @@ at your own risk.
 
 At the DOS prompt
 -----------------
-  MDDESK         the desktop: launcher (About, Files, Run a DOS
-                 program, Exit), window list, clock
+  MDDESK         the desktop: launcher (About, Files, Editor, Run a
+                 DOS program, Exit), window list, clock
   MDVMM          on UEFI: mouse driver and DOS sessions; on BIOS PCs:
                  start the virtual machine monitor (needs HIMEMX)
   MDVMM NEW      start another DOS session; Ctrl+Alt+F1..F4 switch

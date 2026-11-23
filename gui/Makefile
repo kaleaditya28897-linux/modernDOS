@@ -24,7 +24,7 @@ $(B)/font.o: ../mdvmm/core/font.c | $(B)
 $(B)/mdgui.o: $(OBJS)
 	$(CC) -r -nostdlib -o $@ $(OBJS)
 
-DESK    = desk/desk.c desk/files.c
+DESK    = desk/desk.c desk/files.c desk/editor.c
 
 $(B)/MDDESK.EXE: $(DESK) desk/desk.h $(B)/mdgui.o lib/mdgui.h
 	$(CC) $(CFLAGS) -s -o $@ $(DESK) $(B)/mdgui.o

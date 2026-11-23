@@ -183,5 +183,9 @@ python3 "$ROOT/tests/gui/wmcheck.py" debug.log wm.ppm || fail=1
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT/tests/gui/uicheck.py" debug.log ui.ppm || fail=1
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT/tests/gui/deskcheck.py" debug.log desk.ppm || fail=1
 [ -n "$SHOTS" ] && cp ./*.ppm "$SHOTS"/ 2>/dev/null || true    # keep the screenshots
+# the desktop's editor changed this file (DOS boot: the disk is kept)
+if [ "$(mtype -i disk.img "::Created On Linux.txt" 2>/dev/null | od -An -c | tr -d ' \n')" = \
+     "hellofromlinux-editedinmodernDOS\r\nsecondline\r\n" ]; then
+  echo "  ok   editor's file on the disk"; else echo "  FAIL editor's file on the disk"; fail=1; fi
 if [ $fail = 0 ]; then echo "MDVMM TEST: success"; else echo "MDVMM TEST: failure"; fi
 exit $fail

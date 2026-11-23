@@ -134,7 +134,7 @@ int wm_desktop_top(void);
 void wm_quit(void);
 
 /* ui.c - widgets in a window */
-enum { UI_LABEL, UI_BUTTON, UI_CHECK, UI_TEXT, UI_LIST, UI_MENUBAR };
+enum { UI_LABEL, UI_BUTTON, UI_CHECK, UI_TEXT, UI_LIST, UI_MENUBAR, UI_EDIT };
 
 struct ui;
 struct widget;
@@ -161,6 +161,7 @@ struct widget {
   int disabled;
   ui_action action;                     /* click, toggle, select, Enter, menu */
   ui_action activate;                   /* list: Enter, double click (else action) */
+  void *data;                           /* UI_EDIT: the text */
   long last_click;
   void *user;
   struct ui *ui;
@@ -176,6 +177,14 @@ struct widget *ui_list(struct ui *ui, int x, int y, int w, int h, const char *co
                        ui_action a);
 struct widget *ui_menubar(struct ui *ui, const struct ui_menu *menus, int n, ui_action a);
 void ui_set_text(struct widget *w, const char *text);
+/* multi-line text editor; action: the text or the caret changed */
+struct widget *ui_edit(struct ui *ui, int x, int y, int w, int h, ui_action a);
+int edit_set_text(struct widget *w, const char *text, long len);   /* -1: no memory */
+char *edit_get_text(struct widget *w, long *len);   /* malloc'd, CRLF lines */
+int edit_modified(struct widget *w);
+void edit_set_modified(struct widget *w, int m);
+void edit_caret(struct widget *w, int *line, int *col);   /* from 1 */
+int edit_lines(struct widget *w);
 void ui_focus(struct widget *w);
 struct widget *ui_focused(struct ui *ui);
 void ui_redraw(struct ui *ui);
