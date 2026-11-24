@@ -36,9 +36,11 @@ RUN mkdir -p /opt/fdos && cd /opt/fdos \
       && unzip -q -o -LL $p.zip && rm $p.zip; done
 
 # UEFI firmware for the UEFI boot tests (x64 OVMF), xorriso for the release
-# ISO; libfl2 for DJGPP's ar, libslang2-dev for building Watt-32's tools
+# ISO; libfl2 for DJGPP's ar, libslang2-dev for building Watt-32's tools;
+# OpenSSH client and server for the SSH tests
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ovmf xorriso libfl2 libslang2-dev \
+      openssh-client openssh-server \
  && rm -rf /var/lib/apt/lists/*
 
 # Watt-32 TCP/IP for DJGPP -> /opt/watt32 (pinned, checked; see watt32.sh)
