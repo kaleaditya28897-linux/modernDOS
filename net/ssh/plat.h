@@ -5,11 +5,15 @@
 #include <stddef.h>
 #include <stdint.h>
 
+extern const char *plat_prog;           /* name for the log lines */
 int plat_init(void);                    /* network up; 0 on failure */
 void plat_log(const char *fmt, ...);    /* screen + monitor log */
 uint32_t plat_ms(void);                 /* milliseconds, wraps */
 void plat_idle(void);                   /* nothing to do: let others run */
 int plat_key(void);                     /* a key pressed on this console, or -1 */
+int plat_bioskey(void);                 /* BIOS key (scan << 8 | ASCII), or -1 */
+/* show an 80x25 screen of cells (attribute << 8 | char) and the cursor */
+void plat_screen_show(const uint16_t *cells, int row, int col, int cursor_on);
 
 int plat_listen(int port);              /* non-blocking listening socket */
 int plat_accept(int lfd, char *peer, size_t n);   /* -1: none waiting */

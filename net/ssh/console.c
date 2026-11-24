@@ -263,15 +263,22 @@ static uint16_t key_final(uint8_t f)
   return 0;
 }
 
-/* back from UTF-8 to code page 437 (0 if there is no such character) */
-static uint8_t from_unicode(uint32_t u)
+/* back from Unicode to code page 437 (0 if there is no such character) */
+uint8_t cp437_from_unicode(uint32_t u)
 {
   int i;
 
+  if (u >= 0x20 && u < 0x7f)
+    return (uint8_t)u;
   for (i = 128; i < 256; i++)
     if (cp437[i] == u)
       return (uint8_t)i;
   return 0;
+}
+
+uint32_t cp437_to_unicode(uint8_t c)
+{
+  return cp437[c];
 }
 
 int con_keys(struct console *c, const uint8_t *in, size_t n, uint16_t *keys, int max)
@@ -320,7 +327,7 @@ int con_keys(struct console *c, const uint8_t *in, size_t n, uint16_t *keys, int
         break;
       for (j = 1; j < len; j++)
         u = u << 6 | (in[i + j] & 0x3f);
-      ch = from_unicode(u);
+      ch = cp437_from_unicode(u);
       if (ch)
         keys[k++] = ch;
       i += len;

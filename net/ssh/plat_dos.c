@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <dir.h>
 #include <dos.h>
+#include <bios.h>
 #include <dpmi.h>
 #include <go32.h>
 #include <sys/farptr.h>
@@ -24,6 +25,7 @@
 #include "plat.h"
 #include "ssh.h"
 
+const char *plat_prog = "sshd";
 static int have_mdvmm;
 static char home[16], tmpdir[80];
 
@@ -73,7 +75,8 @@ int plat_init(void)
   }
   {
     char ip[20];
-    plat_log("network up, address %s\n", _inet_ntoa(ip, my_ip_addr));
+    if (!strcmp(plat_prog, "sshd"))     /* the client stays quiet */
+      plat_log("network up, address %s\n", _inet_ntoa(ip, my_ip_addr));
   }
   return 1;
 }
@@ -87,14 +90,13 @@ void plat_log(const char *fmt, ...)
   va_start(ap, fmt);
   vsnprintf(buf, sizeof(buf), fmt, ap);
   va_end(ap);
-  fputs(buf, stdout);
-  fflush(stdout);
+  fputs(buf, stderr);                   /* stdout is a command's output */
   if (have_mdvmm)                       /* the monitor's log (and port E9h) */
   {
     __dpmi_regs r;
     char line[320];
     char *p;
-    snprintf(line, sizeof(line), "sshd: %s", buf);
+    snprintf(line, sizeof(line), "%s: %s", plat_prog, buf);
     for (p = line; *p; p++)
       if (*p == '\n')
         *p = '\r';                      /* the log wants CR LF */
@@ -137,6 +139,29 @@ int plat_key(void)
   if (!kbhit())
     return -1;
   return getch();
+}
+
+int plat_bioskey(void)
+{
+  if (!_bios_keybrd(_KEYBRD_READY))
+    return -1;
+  return (int)(_bios_keybrd(_KEYBRD_READ) & 0xffff);
+}
+
+void plat_screen_show(const uint16_t *cells, int row, int col, int cursor_on)
+{
+  __dpmi_regs r;
+
+  dosmemput(cells, 80 * 25 * 2, 0xb8000);
+  memset(&r, 0, sizeof(r));
+  r.h.ah = 0x02;                        /* cursor position, page 0 */
+  r.h.dh = (unsigned char)row;
+  r.h.dl = (unsigned char)col;
+  __dpmi_int(0x10, &r);
+  memset(&r, 0, sizeof(r));
+  r.h.ah = 0x01;                        /* cursor shape */
+  r.x.cx = cursor_on ? 0x0607 : 0x2000;
+  __dpmi_int(0x10, &r);
 }
 
 void plat_nonblock(int fd)

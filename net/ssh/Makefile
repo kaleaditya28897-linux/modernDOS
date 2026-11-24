@@ -9,12 +9,18 @@ COMMON = ssh.c buf.c sha256.c rng.c console.c sftp.c \
 HDRS   = $(wildcard *.h crypto/*.h)
 CFLAGS = -O2 -Wall -Wextra -Wno-unused-parameter
 
-all: $(B)/sshd.exe
+all: $(B)/sshd.exe $(B)/ssh.exe
 
 $(B)/sshd.exe: sshd.c plat_dos.c $(COMMON) $(HDRS) | $(B)
 	$(DJ)gcc $(CFLAGS) -s -I$(WATT)/inc -o $@ sshd.c plat_dos.c $(COMMON) -L$(WATT)/lib -lwatt
 
-host: $(B)/sshd-host
+$(B)/ssh.exe: sshc.c plat_dos.c term.c keyfile.c $(COMMON) $(HDRS) | $(B)
+	$(DJ)gcc $(CFLAGS) -s -I$(WATT)/inc -o $@ sshc.c plat_dos.c term.c keyfile.c $(COMMON) -L$(WATT)/lib -lwatt
+
+host: $(B)/sshd-host $(B)/ssh-host
+
+$(B)/ssh-host: sshc.c plat_host.c term.c keyfile.c $(COMMON) $(HDRS) | $(B)
+	gcc $(CFLAGS) -g -o $@ sshc.c plat_host.c term.c keyfile.c $(COMMON)
 
 $(B)/sshd-host: sshd.c plat_host.c $(COMMON) $(HDRS) | $(B)
 	gcc $(CFLAGS) -g -o $@ sshd.c plat_host.c $(COMMON)

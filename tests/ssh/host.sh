@@ -10,7 +10,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
 WORK=$(mktemp -d)
 PORT=2222
-trap 'kill $SSHD 2>/dev/null; rm -rf "$WORK"' EXIT
+trap 'kill $SSHD $OSSHD 2>/dev/null || true; rm -rf "$WORK"' EXIT
 
 make -s -C "$ROOT/net/ssh" host
 mkdir -p "$WORK/srv" "$WORK/root" "$WORK/home"
@@ -77,7 +77,41 @@ check "sftp: removed" test ! -e "$WORK/root/DIR"
 echo "== rekey"
 check "1 MB with rekeying every 64 KB" bash -c "test \$(ssh ${OPTS[*]} -o RekeyLimit=64K -i $WORK/home/id -p $PORT dos@127.0.0.1 'head -c 1048576 /dev/zero' | wc -c) = 1048576"
 
+echo "== client (SSH.EXE code) against this server and OpenSSH"
+mkdir -p "$WORK/cli" "$WORK/osshd"
+cp "$ROOT/net/ssh/build/ssh-host" "$WORK/cli/ssh"
+check "client: /KEYGEN" bash -c "$WORK/cli/ssh /KEYGEN > $WORK/cli/pub.txt && grep -q '^ssh-ed25519 ' $WORK/cli/pub.txt && ssh-keygen -l -f $WORK/cli/ID.KEY"
+cat "$WORK/cli/pub.txt" >> "$WORK/srv/AUTHKEYS.TXT"
+check "client -> SSHD: exec" bash -c "$WORK/cli/ssh /P $PORT /Y dos@127.0.0.1 'echo client-ok' < /dev/null 2>&1 | grep -qx client-ok"
+check "client: host key remembered" grep -q "^127.0.0.1 $PORT ssh-ed25519 " "$WORK/cli/KNOWNHST.TXT"
+
+ssh-keygen -q -t ed25519 -N "" -f "$WORK/osshd/hostkey"
+cp "$WORK/cli/pub.txt" "$WORK/osshd/authorized_keys"
+cat > "$WORK/osshd/config" <<EOF
+Port 2224
+ListenAddress 127.0.0.1
+HostKey $WORK/osshd/hostkey
+AuthorizedKeysFile $WORK/osshd/authorized_keys
+PidFile none
+UsePAM no
+StrictModes no
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+EOF
+mkdir -p /run/sshd 2>/dev/null || true
+/usr/sbin/sshd -D -e -f "$WORK/osshd/config" 2> "$WORK/osshd/log" &
+OSSHD=$!
+sleep 1
+me=$(id -un)
+check "client -> OpenSSH: exec, exit code" bash -c "$WORK/cli/ssh /P 2224 /Y $me@127.0.0.1 'echo openssh-ok; exit 4' < /dev/null > $WORK/o.txt 2>&1; rc=\$?; grep -qx openssh-ok $WORK/o.txt && test \$rc = 4 || { cat $WORK/o.txt $WORK/osshd/log; false; }"
+check "client -> OpenSSH: 1 MB" bash -c "test \$($WORK/cli/ssh /P 2224 $me@127.0.0.1 'head -c 1048576 /dev/zero' < /dev/null 2>/dev/null | wc -c) = 1048576"
+check "client -> OpenSSH: terminal (pty) screen" bash -c "SSHDUMP=1 $WORK/cli/ssh /P 2224 /T $me@127.0.0.1 'printf \"\\033[2J\\033[3;5HPTY-\\033[1;32mOK\\033[0m\\r\\n\"' < /dev/null 2>&1 | grep -q '^screen:     PTY-OK'"
+check "client: OpenSSH key file (/I)" bash -c "cp $WORK/home/id.pub $WORK/osshd/authorized_keys && $WORK/cli/ssh /P 2224 /I $WORK/home/id $me@127.0.0.1 'echo idkey-ok' < /dev/null 2>&1 | grep -qx idkey-ok"
+sed -i 's/ssh-ed25519 AAAA/ssh-ed25519 BAAA/' "$WORK/cli/KNOWNHST.TXT"
+check "client: changed host key refused" bash -c "! $WORK/cli/ssh /P 2224 /I $WORK/home/id $me@127.0.0.1 true < /dev/null > $WORK/o.txt 2>&1 && grep -q 'HAS CHANGED' $WORK/o.txt"
+kill $OSSHD 2>/dev/null || true
+
 kill $SSHD 2>/dev/null || true
 echo "-- server log"
 sed 's/^/   /' "$WORK/sshd.log" | tail -25
-if [ $fail = 0 ]; then echo "SSH HOST TEST: success"; else echo "SSH HOST TEST: failure"; exit 1; fi
+if [ $fail = 0 ]; then echo "SSH HOST TEST: success"; exit 0; else echo "SSH HOST TEST: failure"; exit 1; fi

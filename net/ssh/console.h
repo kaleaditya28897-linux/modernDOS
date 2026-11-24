@@ -21,4 +21,8 @@ void con_reset(struct buf *o);
 /* terminal input -> BIOS keys (scan << 8 | ASCII); c->used = bytes taken */
 int con_keys(struct console *c, const uint8_t *in, size_t n, uint16_t *keys, int max);
 
+/* code page 437 <-> Unicode */
+uint8_t cp437_from_unicode(uint32_t u);
+uint32_t cp437_to_unicode(uint8_t c);
+
 #endif

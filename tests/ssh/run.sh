@@ -159,4 +159,62 @@ run "DOS boot" "$QEMU" -drive file=disk.img,format=raw,if=floppy
 echo "== UEFI boot"
 run "UEFI boot" qemu-system-x86_64 -bios "$OVMF" -drive file=esp.img,format=raw,if=ide
 
+# ------------------------------------------------------------------
+# the client: SSH.EXE on modernDOS against OpenSSH's sshd here
+echo "== client"
+me=$(id -un)
+mkdir -p osshd
+ssh-keygen -q -t ed25519 -N "" -f osshd/hostkey
+cp id.pub osshd/authorized_keys
+cat > osshd/config <<EOF
+Port 2224
+ListenAddress 127.0.0.1
+HostKey $WORK/osshd/hostkey
+AuthorizedKeysFile $WORK/osshd/authorized_keys
+PidFile none
+UsePAM no
+StrictModes no
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+EOF
+mkdir -p /run/sshd 2>/dev/null || true
+/usr/sbin/sshd -D -e -f "$WORK/osshd/config" 2> osshd/log &
+OSSHD=$!
+printf 'printf "\\033[2J\\033[3;5HPTY-\\033[1;32mOK\\033[0m"\n' > pty.sh
+cat > client.bat <<EOF
+@ECHO OFF
+SET WATTCP.CFG=A:\\
+A:\\MDVMM.COM
+A:\\PKTDRV.COM
+SET SSHDUMP=1
+A:\\SSH.EXE /P 2224 /Y $me@10.0.2.2 touch $WORK/exec-ok
+A:\\SSH.EXE /P 2224 $me@10.0.2.2 exit 5
+IF ERRORLEVEL 5 A:\\SSH.EXE /P 2224 $me@10.0.2.2 touch $WORK/rc5-ok
+A:\\SSH.EXE /P 2224 /T $me@10.0.2.2 sh $WORK/pty.sh
+A:\\SSH.EXE /P 2224 $me@10.0.2.2 ls *.zzz
+A:\\POWEROFF.COM
+EOF
+sed -i 's/$/\r/' client.bat
+cp disk.img client.img
+mdel -i client.img ::SSHD.EXE ::SSHSLOT.COM ::AUTOEXEC.BAT
+mcopy -i client.img client.bat ::AUTOEXEC.BAT
+mcopy -i client.img "$ROOT/net/ssh/build/ssh.exe" ::SSH.EXE
+mcopy -i client.img id ::ID.KEY
+mcopy -i esp.img -o client.img ::/MODERNDOS/BOOT.IMG
+
+client() {   # client name -- qemu args
+  name=$1; shift
+  rm -f debug.log exec-ok rc5-ok
+  timeout --foreground 300 "$@" -m 128 -display none -no-reboot \
+    -nic user,model=e1000 -debugcon file:debug.log </dev/null || true
+  echo "-- $name"
+  grep -a "ssh: \|PANIC" debug.log | sed 's/\r$//; s/^/     /'
+  check "exec: the command ran on the host" test -e exec-ok
+  check "exec: exit code 5 reached ERRORLEVEL" test -e rc5-ok
+  check "terminal: the screen shows PTY-OK at row 3, column 5" grep -aq "ssh: screen:     PTY-OK" debug.log
+}
+client "client, DOS boot" "$QEMU" -drive file=client.img,format=raw,if=floppy
+client "client, UEFI boot" qemu-system-x86_64 -bios "$OVMF" -drive file=esp.img,format=raw,if=ide
+kill $OSSHD 2>/dev/null || true
+
 if [ $fail = 0 ]; then echo "SSH TEST: success"; exit 0; else echo "SSH TEST: failure"; exit 1; fi

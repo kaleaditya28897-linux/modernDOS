@@ -22,6 +22,7 @@
 #define MAX_JOBS 3
 
 static struct { pid_t pid; int state, code; } jobs[MAX_JOBS + 1];
+const char *plat_prog = "sshd";
 static char root[512];
 
 int plat_init(void)
@@ -69,6 +70,20 @@ int plat_key(void)
     return -1;
   }
   return c;
+}
+
+int plat_bioskey(void)
+{
+  int c = plat_key();
+
+  if (c == '\n')
+    c = '\r';
+  return c < 0 ? -1 : c;
+}
+
+void plat_screen_show(const uint16_t *cells, int row, int col, int cursor_on)
+{
+  (void)cells; (void)row; (void)col; (void)cursor_on;
 }
 
 void plat_nonblock(int fd)
