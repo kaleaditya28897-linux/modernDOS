@@ -25,3 +25,17 @@ int bios_mouse_install(void)
 {
   return 0;                             /* DOS boot: load a mouse driver */
 }
+
+/* no framebuffer console: the BIOS has the screen */
+void fbcon_init(void)
+{
+}
+
+void fbcon_log(char c)
+{
+  (void)c;
+}
+
+void fbcon_panic(void)
+{
+}

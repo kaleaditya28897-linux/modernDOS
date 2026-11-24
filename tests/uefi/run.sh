@@ -171,6 +171,7 @@ mcopy -i esp.img "$ROOT/mdvmm/build/BOOTX64.EFI" ::/EFI/BOOT/BOOTX64.EFI
 mcopy -i esp.img boot.img ::/MODERNDOS/BOOT.IMG
 printf 'hard disks writable\r\n' > diskrw
 mcopy -i esp.img diskrw ::/MODERNDOS/DISKRW    # else disks are read-only
+mcopy -i esp.img diskrw ::/MODERNDOS/FBPROBE   # the loader probes the framebuffer too
 
 echo "== booting OVMF in QEMU"
 if [ -n "$SCREEN" ]; then
@@ -271,7 +272,8 @@ sed 's/\r$//; s/\x1b\[[0-9;]*[A-Za-z]//g' serial.log | tr -d '\000' | grep -a -v
 
 echo "== checks"
 fail=0
-for marker in "MDVMM core:" "bios: disk image" "fbcon:" "v86: entering VM1" \
+for marker in "MDVMM core:" "bios: disk image" "fbcon:" "apic: virtual wire mode set" \
+              "timer: ok - the 8254 ticks and its interrupt reaches the CPU" "v86: entering VM1" \
               "vm: sessions enabled" "v86chk: protected mode bit set" \
               "xmstest: 4K round trip" "RESULT: PASSED" "dpmi: 32 bit client" \
               "DJGPP: 0 failures" "DPMI: 0 failures" "vm: session 1 ended" \
@@ -291,10 +293,22 @@ done
 # the loader's hardware report on the ESP
 mtype -i esp.img ::/MODERNDOS/HWINFO.TXT 2>/dev/null | tr -d '\r' > hwinfo.txt || true
 echo "-- HWINFO.TXT (start)"; head -12 hwinfo.txt
-for marker in "Firmware: " "System: " "CPU: " "GOP: mode" "PCI devices" "  00:00.0  8086:" "Usable memory: "; do
+for marker in "Firmware: " "System: " "CPU: " "GOP: mode" "PCI devices" "  00:00.0  8086:" "Usable memory: " "End of report"; do
   if grep -q "$marker" hwinfo.txt; then echo "  ok   hwinfo: $marker"; else
     echo "  FAIL hwinfo missing: $marker"; fail=1; fi
 done
+# the loader's own log, and its framebuffer probe (drawn markers found in
+# the display's memory) against what GOP reports
+mtype -i esp.img ::/MODERNDOS/BOOTLOG.TXT 2>/dev/null | tr -d '\r' > bootlog.txt || true
+echo "-- BOOTLOG.TXT"; sed 's/^/   /' bootlog.txt
+for marker in "Hardware report written" "Memory: disk image at" "Graphics (GOP)" "Starting the monitor"; do
+  if grep -q "$marker" bootlog.txt; then echo "  ok   bootlog: $marker"; else
+    echo "  FAIL bootlog missing: $marker"; fail=1; fi
+done
+gop=$(sed -n 's/^Graphics (GOP): //p' bootlog.txt)
+probe=$(sed -n 's/^Framebuffer probe: //p' bootlog.txt)
+if [ -n "$gop" ] && [ "$gop" = "$probe" ]; then echo "  ok   framebuffer probe agrees with GOP ($probe)"; else
+  echo "  FAIL framebuffer probe: '$probe' but GOP says '$gop'"; fail=1; fi
 
 # the hard disks, from Linux: check_disk image drive name
 check_disk() {

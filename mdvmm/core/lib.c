@@ -40,6 +40,7 @@ static void putc_log(char c)
   if (c == '\n')
     outb(0xe9, '\r');
   outb(0xe9, (uint8_t)c);
+  fbcon_log(c);                         /* UEFI boots: on the screen too */
 }
 
 static void put_num(uint32_t v, unsigned base, int width, char pad, int neg)
@@ -129,6 +130,7 @@ static void halt_forever(void)
 void panic(const char *fmt, ...)
 {
   va_list ap;
+  fbcon_panic();
   kprintf("\nMDVMM PANIC: ");
   va_start(ap, fmt);
   kvprintf(fmt, ap);
@@ -140,6 +142,7 @@ void panic(const char *fmt, ...)
 
 void panic_frame(struct frame *f, const char *why)
 {
+  fbcon_panic();
   kprintf("\nMDVMM PANIC: %s (vector %u, error %08x)\n", why, f->vector, f->err);
   kprintf("  EAX=%08x EBX=%08x ECX=%08x EDX=%08x\n", f->eax, f->ebx, f->ecx, f->edx);
   kprintf("  ESI=%08x EDI=%08x EBP=%08x CR2=%08x\n", f->esi, f->edi, f->ebp, read_cr2());

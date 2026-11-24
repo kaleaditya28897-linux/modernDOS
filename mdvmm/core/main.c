@@ -8,6 +8,8 @@ void trap_dispatch(struct frame *f)
 {
   int user = !(f->eflags & EFL_VM) && (f->cs & 3) == 3;
 
+  if (f->vector == 0xff)
+    return;                     /* local APIC spurious interrupt: no EOI */
   if (f->vector >= 0x20 && f->vector < 0x30)
   {
     dma_irq();                  /* bounced DMA data before any handler */
@@ -42,6 +44,8 @@ void core_main(struct bootinfo *bi, uint32_t free_phys)
 
   mm_init(free_phys);
   cpu_init();
+  if (boot.boot_type == BOOT_UEFI)
+    fbcon_init();               /* the log on the screen from here on */
   dma_init();
   dpmi_init();
   nic_init();                   /* network cards: both boot paths */

@@ -11,6 +11,11 @@
 # boots; on UEFI boots MDVMM installs the virtual BIOS mouse driver), MDVMM,
 # demo.
 #
+# On UEFI boots the loader writes \MODERNDOS\HWINFO.TXT (hardware report)
+# and \MODERNDOS\BOOTLOG.TXT (its own log) to the stick. A version ending
+# in "-dev" is a diagnostic build: it also has \MODERNDOS\BOOTWAIT, which
+# keeps the monitor's boot log on the screen for 15 seconds.
+#
 # Usage: release/build.sh [version]
 
 set -e
@@ -70,12 +75,21 @@ mcopy -i boot.img /opt/fdos/bin/ctmouse.exe ::CTMOUSE.EXE
 mdir -i boot.img ::
 
 echo "== EFI system partition image"
-dd if=/dev/zero of=efiboot.img bs=1M count=4 status=none
+# 30 MB, FAT16: an El Torito EFI image must stay below 32 MB (16 bit sector
+# count), which rules out FAT32; room for the report files and more
+dd if=/dev/zero of=efiboot.img bs=1M count=30 status=none
 mformat -i efiboot.img -v MODERNDOS ::
 mmd -i efiboot.img ::/EFI ::/EFI/BOOT ::/MODERNDOS
 mcopy -i efiboot.img "$ROOT/mdvmm/build/BOOTX64.EFI" ::/EFI/BOOT/BOOTX64.EFI
 mcopy -i efiboot.img boot.img ::/MODERNDOS/BOOT.IMG
 mcopy -i efiboot.img readme.txt ::/README.TXT
+case "$VERSION" in
+  *-dev*)
+    printf 'Keeps the boot log on the screen for 15 seconds. Delete this file to boot faster.\r\n' > bootwait
+    mcopy -i efiboot.img bootwait ::/MODERNDOS/BOOTWAIT
+    echo "diagnostic build: \\MODERNDOS\\BOOTWAIT added" ;;
+esac
+minfo -i efiboot.img :: | grep -i "disk type"
 
 echo "== ISO"
 mkdir -p iso/MODERNDOS iso/EFI/BOOT

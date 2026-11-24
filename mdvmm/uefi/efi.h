@@ -146,7 +146,10 @@ typedef struct EFI_GRAPHICS_OUTPUT_PROTOCOL {
   EFI_STATUS (EFIAPI *QueryMode)(struct EFI_GRAPHICS_OUTPUT_PROTOCOL *This, uint32_t Mode,
                                  UINTN *SizeOfInfo, EFI_GRAPHICS_OUTPUT_MODE_INFORMATION **Info);
   EFI_STATUS (EFIAPI *SetMode)(struct EFI_GRAPHICS_OUTPUT_PROTOCOL *This, uint32_t Mode);
-  void *Blt;
+  /* pixels are { blue, green, red, reserved }; operation 0 = fill */
+  EFI_STATUS (EFIAPI *Blt)(struct EFI_GRAPHICS_OUTPUT_PROTOCOL *This, uint32_t *Buffer, int Operation,
+                           UINTN SrcX, UINTN SrcY, UINTN DstX, UINTN DstY, UINTN Width,
+                           UINTN Height, UINTN Delta);
   EFI_GRAPHICS_OUTPUT_PROTOCOL_MODE *Mode;
 } EFI_GRAPHICS_OUTPUT_PROTOCOL;
 
@@ -154,7 +157,18 @@ typedef struct EFI_GRAPHICS_OUTPUT_PROTOCOL {
 typedef struct EFI_UGA_DRAW_PROTOCOL {
   EFI_STATUS (EFIAPI *GetMode)(struct EFI_UGA_DRAW_PROTOCOL *This, uint32_t *Width,
                                uint32_t *Height, uint32_t *Depth, uint32_t *Refresh);
-  void *SetMode, *Blt;
+  void *SetMode;
+  EFI_STATUS (EFIAPI *Blt)(struct EFI_UGA_DRAW_PROTOCOL *This, uint32_t *Buffer, int Operation,
+                           UINTN SrcX, UINTN SrcY, UINTN DstX, UINTN DstY, UINTN Width,
+                           UINTN Height, UINTN Delta);
 } EFI_UGA_DRAW_PROTOCOL;
+
+/* Apple's console control: the firmware console starts in graphics mode */
+typedef struct EFI_CONSOLE_CONTROL_PROTOCOL {
+  EFI_STATUS (EFIAPI *GetMode)(struct EFI_CONSOLE_CONTROL_PROTOCOL *This, int *Mode,
+                               uint8_t *GopExists, uint8_t *StdInLocked);
+  EFI_STATUS (EFIAPI *SetMode)(struct EFI_CONSOLE_CONTROL_PROTOCOL *This, int Mode);
+  void *LockStdIn;
+} EFI_CONSOLE_CONTROL_PROTOCOL;
 
 #endif

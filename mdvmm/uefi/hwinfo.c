@@ -278,13 +278,31 @@ static void memory(EFI_BOOT_SERVICES *bs)
   put("Usable memory: "); dec(total >> 20); put(" MB"); nl();
 }
 
-/* write the report to \MODERNDOS\HWINFO.TXT; 0 on success */
+/* (re)write the report so far; 0 on success */
+static int save(EFI_FILE_PROTOCOL *root)
+{
+  EFI_FILE_PROTOCOL *f;
+  UINTN n = len;
+  EFI_STATUS s;
+
+  if (!root->Open(root, &f, (CHAR16 *)u"\\MODERNDOS\\HWINFO.TXT", EFI_FILE_MODE_READ | EFI_FILE_MODE_WRITE, 0))
+    f->Delete(f);
+  if (root->Open(root, &f, (CHAR16 *)u"\\MODERNDOS\\HWINFO.TXT",
+                 EFI_FILE_MODE_READ | EFI_FILE_MODE_WRITE | EFI_FILE_MODE_CREATE, 0))
+    return -1;
+  s = f->Write(f, &n, rep);
+  f->Close(f);
+  return s || n != len ? -1 : 0;
+}
+
+/* write the report to \MODERNDOS\HWINFO.TXT; 0 on success. It is saved
+   after every section, the most useful ones first: if a section hangs
+   on some firmware, the rest is on the disk already. */
 int hwinfo_write(EFI_HANDLE image, EFI_SYSTEM_TABLE *st, EFI_FILE_PROTOCOL *root)
 {
   EFI_BOOT_SERVICES *bs = st->BootServices;
-  EFI_FILE_PROTOCOL *f;
   uint64_t buf = 0xffffffffull;
-  UINTN i, n;
+  UINTN i;
 
   (void)image;
   if (bs->AllocatePages(AllocateMaxAddress, EfiLoaderData, REPORT_MAX / 4096, &buf))
@@ -295,25 +313,21 @@ int hwinfo_write(EFI_HANDLE image, EFI_SYSTEM_TABLE *st, EFI_FILE_PROTOCOL *root
   put("Firmware: "); put16(st->FirmwareVendor); put(" revision "); hex(st->FirmwareRevision, 8);
   put(", EFI "); dec(st->Hdr.Revision >> 16); putc_('.'); dec((st->Hdr.Revision & 0xffff) / 10);
   nl();
-  smbios(st);
-  cpu();
-  graphics(bs);
+  if (save(root))
+    return -1;                          /* read-only medium */
   pci_devices();
+  save(root);
+  graphics(bs);
+  save(root);
+  cpu();
+  smbios(st);
+  save(root);
   put("EFI configuration tables"); nl();
   for (i = 0; i < st->NumberOfTableEntries; i++)
   {
     put("  "); guid(&st->ConfigurationTable[i].VendorGuid); nl();
   }
   memory(bs);
-
-  /* replace an old report */
-  if (!root->Open(root, &f, (CHAR16 *)u"\\MODERNDOS\\HWINFO.TXT", EFI_FILE_MODE_READ | EFI_FILE_MODE_WRITE, 0))
-    f->Delete(f);
-  if (root->Open(root, &f, (CHAR16 *)u"\\MODERNDOS\\HWINFO.TXT",
-                 EFI_FILE_MODE_READ | EFI_FILE_MODE_WRITE | EFI_FILE_MODE_CREATE, 0))
-    return -1;
-  n = len;
-  i = f->Write(f, &n, rep);
-  f->Close(f);
-  return i || n != len ? -1 : 0;
+  put("End of report"); nl();
+  return save(root);
 }

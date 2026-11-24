@@ -1282,6 +1282,8 @@ void bios_init(void)
   for (i = 0; i < 32 && inb(0x64) != 0xff && (inb(0x64) & 1); i++)
     inb(0x60);                          /* drain the keyboard controller (Macs
                                            have none: the status reads FFh) */
+  apic_setup();                         /* PIC interrupts to the CPU, 8254 on IRQ0 */
+  timer_selftest();
 
   serial_init();
   disk_init();
@@ -1292,7 +1294,6 @@ void bios_init(void)
   if (nhd)
     kprintf("bios: hard disks are %s\n", boot.flags & BOOTF_DISK_WRITE ? "writable" :
             "read-only (no \\MODERNDOS\\DISKRW on the boot volume)");
-  fbcon_init();
   active = 1;
 
   /* boot: the disk image's boot sector at 0000:7C00, DL = drive */
@@ -1307,4 +1308,13 @@ void bios_init(void)
   boot.eflags = EFL_IF;
   kprintf("bios: %u KB conventional memory, %u KB extended at %08x, booting the disk image\n",
           conv, boot.xms_size / 1024, boot.xms_phys);
+
+  /* the log leaves the screen; \MODERNDOS\BOOTWAIT keeps it for a while
+     (to read or photograph it on a machine that does not get further) */
+  if (boot.flags & BOOTF_LOG_PAUSE)
+  {
+    kprintf("bios: the log stays on the screen for 15 seconds (\\MODERNDOS\\BOOTWAIT)\n");
+    pit_wait(273);
+  }
+  fbcon_text();
 }

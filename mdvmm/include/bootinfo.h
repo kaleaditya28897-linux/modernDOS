@@ -20,6 +20,7 @@
 #define BOOT_UEFI  1        /* started from UEFI: no BIOS, core boots DOS */
 
 #define BOOTF_DISK_WRITE 0x1   /* UEFI: native hard disks may be written */
+#define BOOTF_LOG_PAUSE  0x2   /* UEFI: keep the boot log on the screen for a while */
 
 #define FB_RGBX    0        /* GOP PixelRedGreenBlueReserved8BitPerColor */
 #define FB_BGRX    1        /* GOP PixelBlueGreenRedReserved8BitPerColor */
