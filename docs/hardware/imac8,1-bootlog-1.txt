@@ -1,0 +1,8 @@
+MDVMM - modernDOS virtual machine monitor (UEFI)
+Firmware: Apple, EFI 1.10
+Hardware report written to \MODERNDOS\HWINFO.TXT
+Memory: disk image at 0x00000000BD374000, monitor pool 32 MB at 0x00000000BAE21000, DOS extended memory 64 MB at 0x00000000B6E21000
+Hard disks are read-only (no \MODERNDOS\DISKRW).
+The monitor's log will stay on the screen for a while (\MODERNDOS\BOOTWAIT).
+MDVMM: UGA graphics, 1680x1050 depth 32: framebuffer not found, the screen stays dark
+Starting the monitor (leaving the firmware's boot services)...

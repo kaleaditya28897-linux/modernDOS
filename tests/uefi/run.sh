@@ -306,9 +306,11 @@ for marker in "Hardware report written" "Memory: disk image at" "Graphics (GOP)"
     echo "  FAIL bootlog missing: $marker"; fail=1; fi
 done
 gop=$(sed -n 's/^Graphics (GOP): //p' bootlog.txt)
-probe=$(sed -n 's/^Framebuffer probe: //p' bootlog.txt)
-if [ -n "$gop" ] && [ "$gop" = "$probe" ]; then echo "  ok   framebuffer probe agrees with GOP ($probe)"; else
-  echo "  FAIL framebuffer probe: '$probe' but GOP says '$gop'"; fail=1; fi
+for how in scan poke; do
+  probe=$(sed -n "s/^Framebuffer probe ($how): //p" bootlog.txt)
+  if [ -n "$gop" ] && [ "$gop" = "$probe" ]; then echo "  ok   framebuffer probe ($how) agrees with GOP ($probe)"; else
+    echo "  FAIL framebuffer probe ($how): '$probe' but GOP says '$gop'"; fail=1; fi
+done
 
 # the hard disks, from Linux: check_disk image drive name
 check_disk() {

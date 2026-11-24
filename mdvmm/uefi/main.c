@@ -208,20 +208,54 @@ static void pci_wr(int bus, int dev, int fn, int reg, uint32_t v)
   outl(0xcfc, v);
 }
 
-#define MARK0 0x00a1b2c3u
-#define MARK1 0x00123456u
-#define MARK2 0x00c3a1b2u
-#define MARK3 0x00654321u
-#define PROBE_MAX 0x1000000u            /* look at the first 16 MB of a BAR */
+/* Where does the screen live in memory? UGA (EFI 1.1, older Apple
+   firmware) can draw and read pixels but does not say. Two independent
+   ways to find out, both through the memory BARs of the display
+   controllers:
+     scan: fill the screen with one colour and rows 1 and 3 with another,
+           then look for those rows in the video memory; their distance
+           gives the length of a scan line, their place the address of
+           pixel (0,0)
+     poke: write a marker into the video memory, page by page, and ask
+           the firmware to read pixel (0,0); then the same for (0,1)
+   Apple's firmware may only draw in its "graphics" console mode, so both
+   are tried there first, then in text mode. Everything is logged. */
+#define COL_A 0x00102030u               /* the screen */
+#define COL_B 0x00a1b2c3u               /* rows 1 and 3 */
+#define COL_M 0x005a3c96u               /* poked into memory */
 
-/* Where does the screen live in memory? For firmware that can only draw
-   (UGA, or GOP without a framebuffer address): four marker pixels are
-   drawn at (0,0) (1,0) (2,0) (0,1) and searched for in the memory BARs of
-   the display controllers. That gives the address of pixel (0,0) and the
-   length of a scan line. 1 if found. */
-static int fb_probe(uint32_t width, uint64_t *base, uint32_t *pitch)
+struct vbar { uint32_t base, size; };
+
+static EFI_GRAPHICS_OUTPUT_PROTOCOL *p_gop;
+static EFI_UGA_DRAW_PROTOCOL *p_uga;
+static EFI_CONSOLE_CONTROL_PROTOCOL *conctl;
+
+static EFI_STATUS blt(uint32_t *buf, int op, UINTN sx, UINTN sy, UINTN dx, UINTN dy, UINTN w, UINTN h)
 {
-  int bus, dev, fn, bar;
+  if (p_gop)
+    return p_gop->Blt(p_gop, buf, op, sx, sy, dx, dy, w, h, 0);
+  return p_uga->Blt(p_uga, buf, op, sx, sy, dx, dy, w, h, 0);
+}
+
+static EFI_STATUS fill(uint32_t color, UINTN x, UINTN y, UINTN w, UINTN h)
+{
+  return blt(&color, 0, 0, 0, x, y, w, h);
+}
+
+/* the pixel as the firmware reads it back, FFFFFFFFh if it can not */
+static uint32_t pixel(UINTN x, UINTN y)
+{
+  uint32_t v = 0;
+
+  if (blt(&v, 1, x, y, 0, 0, 1, 1))
+    return 0xffffffffu;
+  return v & 0xffffff;
+}
+
+/* memory BARs (1 MB and more, below 4GB) of the display controllers */
+static int display_bars(struct vbar *out, int max)
+{
+  int bus, dev, fn, bar, n = 0;
 
   for (bus = 0; bus < 256; bus++)
     for (dev = 0; dev < 32; dev++)
@@ -238,50 +272,100 @@ static int fb_probe(uint32_t width, uint64_t *base, uint32_t *pitch)
         if ((pci_rd(bus, dev, fn, 8) >> 24) == 0x03 && ((hdr >> 16) & 0x7f) == 0)
           for (bar = 0; bar < 6; bar++)
           {
-            uint32_t lo = pci_rd(bus, dev, fn, 0x10 + bar * 4), size, off;
-            int is64 = (lo & 7) == 4;
-            const volatile uint32_t *m;
+            uint32_t lo = pci_rd(bus, dev, fn, 0x10 + bar * 4), size;
+            int is64 = (lo & 7) == 4, reg = 0x10 + bar * 4;
             if (lo & 1)
               continue;                 /* I/O ports */
-            if (is64 && pci_rd(bus, dev, fn, 0x14 + bar * 4))
-            {
-              bar++;
-              continue;                 /* above 4GB: not usable for us */
-            }
-            if (!(lo & ~0xfu))
-            {
-              bar += is64;
-              continue;
-            }
-            /* size of the BAR */
-            __asm__ volatile("cli");
-            pci_wr(bus, dev, fn, 0x10 + bar * 4, 0xffffffffu);
-            size = ~(pci_rd(bus, dev, fn, 0x10 + bar * 4) & ~0xfu) + 1;
-            pci_wr(bus, dev, fn, 0x10 + bar * 4, lo);
-            __asm__ volatile("sti");
             bar += is64;
-            if (size < 0x100000 || (size & (size - 1)))
-              continue;                 /* registers, not a framebuffer */
-            if (size > PROBE_MAX)
-              size = PROBE_MAX;
-            m = (const volatile uint32_t *)(uintptr_t)(lo & ~0xfu);
-            for (off = 0; off + 16 <= size; off += 4)
-              if ((m[off / 4] & 0xffffff) == MARK0 && (m[off / 4 + 1] & 0xffffff) == MARK1 &&
-                  (m[off / 4 + 2] & 0xffffff) == MARK3)
-              {
-                uint32_t p;
-                for (p = width; p <= width + 1024 && off + p * 4 + 4 <= size; p++)
-                  if ((m[off / 4 + p] & 0xffffff) == MARK2)
-                  {
-                    *base = (uint64_t)(lo & ~0xfu) + off;
-                    *pitch = p;
-                    return 1;
-                  }
-              }
+            if ((is64 && pci_rd(bus, dev, fn, reg + 4)) || !(lo & ~0xfu))
+              continue;                 /* above 4GB, or not set */
+            __asm__ volatile("cli");
+            pci_wr(bus, dev, fn, reg, 0xffffffffu);
+            size = ~(pci_rd(bus, dev, fn, reg) & ~0xfu) + 1;
+            pci_wr(bus, dev, fn, reg, lo);
+            __asm__ volatile("sti");
+            if (size < 0x100000 || (size & (size - 1)) || n == max)
+              continue;                 /* registers, not video memory */
+            out[n].base = lo & ~0xfu;
+            out[n].size = size;
+            n++;
           }
         if (fn == 0 && !(hdr & 0x00800000))
           break;
       }
+  return n;
+}
+
+static int probe_scan(uint32_t w, const struct vbar *b, uint64_t *base, uint32_t *pitch)
+{
+  const volatile uint32_t *m = (const volatile uint32_t *)(uintptr_t)b->base;
+  uint32_t n = b->size / 4, i, j, lo, hi, r1 = 0, r3 = 0, run, p;
+
+  /* coarse: some pixel of the filled screen, every 64 KB */
+  for (i = 0; i < n && (m[i] & 0xffffff) != COL_A; i += 0x4000)
+    ;
+  if (i >= n)
+    return 0;
+  /* the marker rows are at the start of the screen: near that hit */
+  lo = i > 0x6000 ? i - 0x6000 : 0;
+  hi = i + 0x6000 < n ? i + 0x6000 : n;
+  for (j = lo; j + w <= hi && !r3; j++)
+  {
+    if ((m[j] & 0xffffff) != COL_B)
+      continue;
+    for (run = 1; run <= w && j + run < hi && (m[j + run] & 0xffffff) == COL_B; run++)
+      ;
+    if (run == w)
+    {
+      if (!r1)
+        r1 = j + 1;                     /* + 1: 0 means none */
+      else
+        r3 = j + 1;
+    }
+    j += run;
+  }
+  if (!r1 || !r3)
+    return 0;
+  r1--;
+  r3--;
+  p = (r3 - r1) / 2;
+  if ((r3 - r1) % 2 || p < w || p > 4 * w || r1 < p ||
+      (m[r1 - p] & 0xffffff) != COL_A || (m[r1 + p] & 0xffffff) != COL_A)
+    return 0;
+  *base = (uint64_t)b->base + (uint64_t)(r1 - p) * 4;
+  *pitch = p;
+  return 1;
+}
+
+static int probe_poke(uint32_t w, const struct vbar *b, uint64_t *base, uint32_t *pitch)
+{
+  volatile uint32_t *m = (volatile uint32_t *)(uintptr_t)b->base;
+  uint32_t limit = b->size < 0x2000000 ? b->size : 0x2000000, off, p, old;
+  int hit = 0;
+
+  for (off = 0; off < limit && !hit; off += 0x1000)
+  {
+    old = m[off / 4];
+    m[off / 4] = COL_M;
+    hit = pixel(0, 0) == COL_M;
+    m[off / 4] = old;
+  }
+  if (!hit)
+    return 0;
+  off -= 0x1000;
+  for (p = w; p <= w + 2048 && off + p * 4 < b->size; p++)
+  {
+    old = m[off / 4 + p];
+    m[off / 4 + p] = COL_M;
+    hit = pixel(0, 1) == COL_M;
+    m[off / 4 + p] = old;
+    if (hit)
+    {
+      *base = (uint64_t)b->base + off;
+      *pitch = p;
+      return 1;
+    }
+  }
   return 0;
 }
 
@@ -299,30 +383,89 @@ static void log_fb(const CHAR16 *how, uint64_t base, uint32_t w, uint32_t h, uin
   print(u" pixels per line\r\n");
 }
 
+/* both probes; the results in *base, *pitch (scan preferred). `both`:
+   log each result (tests compare them with GOP). 1 if found. */
+static int fb_probe(uint32_t w, uint32_t h, uint64_t *base, uint32_t *pitch, int both)
+{
+  struct vbar bars[8];
+  int n = display_bars(bars, 8), i, mode, found = 0;
+  uint64_t b2 = 0;
+  uint32_t p2 = 0;
+
+  print(u"Framebuffer probe: ");
+  print_dec((uint64_t)n);
+  print(u" video memory area(s)");
+  for (i = 0; i < n; i++)
+  {
+    print(u" ");
+    print_hex(bars[i].base);
+    print(u"+");
+    print_hex(bars[i].size);
+  }
+  print(u"\r\n");
+  /* mode 1: graphics console, mode 0: text console (Apple) */
+  for (mode = 1; mode >= 0 && !found; mode--)
+  {
+    EFI_STATUS s1, s2;
+    uint32_t back;
+    if (conctl)
+      conctl->SetMode(conctl, mode);
+    else if (mode == 0)
+      break;                            /* no console modes: one pass */
+    s1 = fill(COL_A, 0, 0, w, h);
+    s2 = fill(COL_B, 0, 1, w, 1);
+    fill(COL_B, 0, 3, w, 1);
+    back = pixel(0, 1);
+    for (i = 0; i < n && !found; i++)
+    {
+      int a = probe_scan(w, &bars[i], base, pitch);
+      int b = (!a || both) && probe_poke(w, &bars[i], &b2, &p2);
+      if (both && a)
+        log_fb(u"Framebuffer probe (scan)", *base, w, h, *pitch);
+      if (both && b)
+        log_fb(u"Framebuffer probe (poke)", b2, w, h, p2);
+      if (!a && b)
+      {
+        *base = b2;
+        *pitch = p2;
+      }
+      found = a || b;
+      if (conctl)
+        conctl->SetMode(conctl, 0);     /* text again, to say it */
+      print(conctl ? (mode ? u"  graphics console" : u"  text console") : u"  console");
+      print(u", area ");
+      print_dec((uint64_t)i);
+      print(u": fill status ");
+      print_hex(s1);
+      print(u"/");
+      print_hex(s2);
+      print(u", pixel (0,1) reads ");
+      print_hex(back);
+      print(a ? u", scan found it" : u", scan: no");
+      print(b ? u", poke found it\r\n" : (!a || both) ? u", poke: no\r\n" : u"\r\n");
+      if (conctl && !found)
+        conctl->SetMode(conctl, mode);
+    }
+    if (conctl)
+      conctl->SetMode(conctl, 0);
+  }
+  return found;
+}
+
 static void find_framebuffer(struct bootinfo *bi, int probe_test)
 {
-  EFI_GRAPHICS_OUTPUT_PROTOCOL *gop;
-  EFI_UGA_DRAW_PROTOCOL *uga;
   EFI_GRAPHICS_OUTPUT_MODE_INFORMATION *info;
-  uint32_t mark[4] = { MARK0, MARK1, MARK3, MARK2 }, pitch = 0;
+  uint32_t pitch = 0;
   uint64_t base = 0;
 
-  if (!bs->LocateProtocol(&gop_guid, 0, (void **)&gop) && gop->Mode)
+  if (!bs->LocateProtocol(&gop_guid, 0, (void **)&p_gop) && p_gop->Mode)
   {
+    EFI_GRAPHICS_OUTPUT_PROTOCOL *gop = p_gop;
     info = gop->Mode->Info;
     log_fb(u"Graphics (GOP)", gop->Mode->FrameBufferBase, info->HorizontalResolution,
            info->VerticalResolution, info->PixelsPerScanLine);
-    if (probe_test)                     /* tests: the probe must agree with GOP */
-    {
-      gop->Blt(gop, &mark[0], 0, 0, 0, 0, 0, 1, 1, 0);
-      gop->Blt(gop, &mark[1], 0, 0, 0, 1, 0, 1, 1, 0);
-      gop->Blt(gop, &mark[2], 0, 0, 0, 2, 0, 1, 1, 0);
-      gop->Blt(gop, &mark[3], 0, 0, 0, 0, 1, 1, 1, 0);
-      if (fb_probe(info->HorizontalResolution, &base, &pitch))
-        log_fb(u"Framebuffer probe", base, info->HorizontalResolution, info->VerticalResolution, pitch);
-      else
-        print(u"Framebuffer probe: not found\r\n");
-    }
+    if (probe_test)                     /* tests: the probes must agree with GOP */
+      fb_probe(info->HorizontalResolution, info->VerticalResolution, &base, &pitch, 1);
     if (gop->Mode->FrameBufferBase + gop->Mode->FrameBufferSize > 0x100000000ull ||
         (info->PixelFormat != PixelRedGreenBlueReserved8BitPerColor &&
          info->PixelFormat != PixelBlueGreenRedReserved8BitPerColor))
@@ -338,32 +481,29 @@ static void find_framebuffer(struct bootinfo *bi, int probe_test)
     bi->fb_format = info->PixelFormat == PixelRedGreenBlueReserved8BitPerColor ? FB_RGBX : FB_BGRX;
     return;
   }
-  /* EFI 1.1 graphics (older Apple firmware): UGA can draw but does not
-     say where the framebuffer is */
-  if (!bs->LocateProtocol(&uga_guid, 0, (void **)&uga))
+  p_gop = 0;
+  /* EFI 1.1 graphics (older Apple firmware) */
+  if (!bs->LocateProtocol(&uga_guid, 0, (void **)&p_uga))
   {
     uint32_t w = 0, h = 0, depth = 0, refresh = 0;
-    if (uga->GetMode(uga, &w, &h, &depth, &refresh) || !w || !h)
+    if (p_uga->GetMode(p_uga, &w, &h, &depth, &refresh) || !w || !h)
     {
       print(u"MDVMM: UGA graphics without a mode, the screen stays dark\r\n");
       return;
     }
-    uga->Blt(uga, &mark[0], 0, 0, 0, 0, 0, 1, 1, 0);
-    uga->Blt(uga, &mark[1], 0, 0, 0, 1, 0, 1, 1, 0);
-    uga->Blt(uga, &mark[2], 0, 0, 0, 2, 0, 1, 1, 0);
-    uga->Blt(uga, &mark[3], 0, 0, 0, 0, 1, 1, 1, 0);
-    if (depth != 32 || !fb_probe(w, &base, &pitch))
+    print(u"Graphics (UGA): ");
+    print_dec(w);
+    print(u"x");
+    print_dec(h);
+    print(u", depth ");
+    print_dec(depth);
+    print(u"\r\n");
+    if (depth != 32 || !fb_probe(w, h, &base, &pitch, 0))
     {
-      print(u"MDVMM: UGA graphics, ");
-      print_dec(w);
-      print(u"x");
-      print_dec(h);
-      print(u" depth ");
-      print_dec(depth);
-      print(u": framebuffer not found, the screen stays dark\r\n");
+      print(u"MDVMM: framebuffer not found, the screen stays dark\r\n");
       return;
     }
-    log_fb(u"Graphics (UGA, framebuffer found by probing)", base, w, h, pitch);
+    log_fb(u"Framebuffer found", base, w, h, pitch);
     bi->fb_phys = (uint32_t)base;
     bi->fb_size = pitch * 4 * h;
     bi->fb_width = w;
@@ -421,9 +561,10 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *systab)
   bs->SetWatchdogTimer(0, 0, 0, 0);
   {
     /* Apple firmware: show the text console (it starts in graphics mode) */
-    EFI_CONSOLE_CONTROL_PROTOCOL *cc;
-    if (!bs->LocateProtocol(&conctl_guid, 0, (void **)&cc))
-      cc->SetMode(cc, 0);
+    if (!bs->LocateProtocol(&conctl_guid, 0, (void **)&conctl))
+      conctl->SetMode(conctl, 0);
+    else
+      conctl = 0;
   }
   print(u"MDVMM - modernDOS virtual machine monitor (UEFI)\r\n");
   print(u"Firmware: ");
