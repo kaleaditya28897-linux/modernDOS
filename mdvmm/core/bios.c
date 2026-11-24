@@ -648,6 +648,7 @@ static void int16(struct frame *f)
   int ext = AH(f) & 0x10;
 
   xhci_poll();                          /* a key may be waiting */
+  uhci_poll();
   switch (AH(f))
   {
     case 0x00:
@@ -1150,6 +1151,7 @@ int bios_bp(struct frame *f, uint16_t ip)
       BDA8(0x70) = 1;
     }
     xhci_poll();                        /* USB keyboards */
+    uhci_poll();
     usbkbd_tick();
     fbcon_update();
     f->eip++;
@@ -1290,6 +1292,7 @@ void bios_init(void)
   ahci_init();
   nvme_init();
   xhci_init();
+  uhci_init();
   BDA8(0x75) = (uint8_t)nhd;            /* number of hard disks */
   if (nhd)
     kprintf("bios: hard disks are %s\n", boot.flags & BOOTF_DISK_WRITE ? "writable" :

@@ -18,3 +18,4 @@ build/*.sh text eol=lf
 tests/net/*.sh text eol=lf
 tests/ssh/*.sh text eol=lf
 net/** text eol=lf
+tests/usb/*.sh text eol=lf

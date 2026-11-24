@@ -20,6 +20,7 @@
 #define DISK_RW_FILE  u"\\MODERNDOS\\DISKRW"  /* present: disks writable */
 #define BOOTWAIT_FILE u"\\MODERNDOS\\BOOTWAIT" /* present: the core's log stays a while */
 #define FBPROBE_FILE  u"\\MODERNDOS\\FBPROBE"  /* present: probe the framebuffer (tests) */
+#define NONET_FILE    u"\\MODERNDOS\\NONET"    /* present: no network card drivers */
 #define LOG_FILE      u"\\MODERNDOS\\BOOTLOG.TXT"
 
 extern const uint8_t core_image[], core_image_end[];
@@ -650,6 +651,11 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *systab)
     print(u"Hard disks are read-only (no \\MODERNDOS\\DISKRW).\r\n");
   bi->xms_phys = (uint32_t)xms;
   bi->xms_size = xms_mb << 20;
+  if (file_exists(image, NONET_FILE))
+  {
+    bi->flags |= BOOTF_NO_NET;
+    print(u"Network card drivers are off (\\MODERNDOS\\NONET).\r\n");
+  }
   if (file_exists(image, BOOTWAIT_FILE))
   {
     bi->flags |= BOOTF_LOG_PAUSE;

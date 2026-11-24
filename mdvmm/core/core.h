@@ -180,6 +180,7 @@ void fbcon_init(void);
 void fbcon_text(void);
 void fbcon_log(char c);
 void fbcon_panic(void);
+uint32_t fbcon_log_copy(char *dst, uint32_t room, uint32_t lines);
 void fbcon_update(void);
 void fbcon_graphics(int on);
 void fbcon_clear(void);
@@ -215,6 +216,8 @@ void nvme_init(void);
 /* xhci.c, usbkbd.c: USB keyboards */
 void xhci_init(void);
 void xhci_poll(void);
+void uhci_init(void);
+void uhci_poll(void);
 void usbkbd_report(const uint8_t *report);
 void usbkbd_tick(void);
 
@@ -230,11 +233,13 @@ struct nic {
   int (*send)(struct nic *n, const void *frame, int len);     /* 0 ok */
   int (*recv)(struct nic *n, void *frame, int room);   /* len, 0 none, -1 dropped */
   int (*link)(struct nic *n);
+  void (*debug)(struct nic *n);         /* optional: its state to the log */
 };
 void nic_register(struct nic *n);
 void nic_init(void);
 void nic_api(struct frame *f);
 void e1000_init(void);
+void yukon2_init(void);
 
 /* dma.c */
 void dma_init(void);

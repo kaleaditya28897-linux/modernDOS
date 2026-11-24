@@ -20,7 +20,8 @@ Rufus in "DD image" mode), or burn it to a CD.
 
 On UEFI, MDVMM starts first and provides the PC BIOS that DOS expects:
 text console on the firmware's framebuffer (GOP, or UGA on older Apple
-firmware), keyboard (PS/2 or USB on xHCI root ports), USB mouse (INT 33h), timer, SATA (AHCI) and NVMe disks, VBE
+firmware), keyboard (PS/2, or USB on xHCI and UHCI controllers, also
+behind hubs), USB mouse (INT 33h), timer, SATA (AHCI) and NVMe disks, VBE
 graphics, extended memory for XMS. DOS then boots from \MODERNDOS\BOOT.IMG (drive A:, a RAM
 copy: changes to A: are lost at reboot).
 
@@ -45,9 +46,23 @@ At the DOS prompt
   MDVMM NEW      start another DOS session; Ctrl+Alt+F1..F4 switch
   GFXDEMO        draw a test picture in graphics mode for 3 seconds
 
-Not yet: starting 32-bit DPMI programs from the desktop, USB keyboards on
-UHCI/EHCI controllers or behind hubs, network cards other than Intel
-e1000 (network and SSH programs are in the source tree, not on this disk).
+Network (new, little tested on real machines)
+---------------------------------------------
+  NET            start the network and the SSH server: job slots for
+                 remote shells, a local prompt on Ctrl+Alt+F4, PKTDRV (a
+                 packet driver on MDVMM's card drivers: Intel e1000,
+                 Marvell Yukon-2), then SSHD. Needs A:\AUTHKEYS.TXT (public
+                 keys, authorized_keys format) or a password (SSHD /PASSWD).
+                 Addresses come from DHCP (A:\WATTCP.CFG).
+  SSH            SSH client: SSH user@host [command], SSH /KEYGEN
+  MDLOG          the monitor's log; MDLOG /N adds the network card's state
+From another machine: ssh, sftp and scp to the address SSHD prints; DOS
+drives appear as /A, /C, ...
+A file \MODERNDOS\NONET on the stick turns the network card drivers off.
+
+Not yet: starting 32-bit DPMI programs from the desktop or in an SSH
+session (one at a time), USB devices plugged in after the start, USB
+storage, other network cards.
 
 Source: https://github.com/kaleaditya28897-linux/modernDOS (branch modern)
 License: GNU GPL v2 (see COPYING). FreeCOM and HIMEMX are from FreeDOS.

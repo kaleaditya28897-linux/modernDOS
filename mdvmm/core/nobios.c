@@ -39,3 +39,11 @@ void fbcon_log(char c)
 void fbcon_panic(void)
 {
 }
+
+uint32_t fbcon_log_copy(char *dst, uint32_t room, uint32_t lines)
+{
+  (void)dst;
+  (void)room;
+  (void)lines;
+  return 0;                             /* the log is not kept on DOS boots */
+}

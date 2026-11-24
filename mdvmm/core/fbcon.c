@@ -165,6 +165,27 @@ void fbcon_log(char c)
     log_glyph(lrow, lcol++, (uint8_t)c);
 }
 
+/* the last `lines` lines of the log (0: all that are kept) as text */
+uint32_t fbcon_log_copy(char *dst, uint32_t room, uint32_t lines)
+{
+  uint32_t first = ring_line >= LOG_LINES ? ring_line - (LOG_LINES - 1) : 0, l, n = 0;
+  const char *s;
+
+  if (lines && ring_line + 1 > lines && ring_line + 1 - lines > first)
+    first = ring_line + 1 - lines;
+  for (l = first; l <= ring_line; l++)
+  {
+    for (s = ring[l % LOG_LINES]; *s && n + 2 < room; s++)
+      dst[n++] = *s;
+    if (n + 2 < room && l < ring_line)
+    {
+      dst[n++] = '\r';
+      dst[n++] = '\n';
+    }
+  }
+  return n;
+}
+
 /* clear the whole framebuffer */
 void fbcon_clear(void)
 {

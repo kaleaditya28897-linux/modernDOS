@@ -17,6 +17,7 @@ md_run bash -c '
   tests/lfn/run.sh _output/gcc/kgc8632.sys || rc=1
   tests/mdvmm/run.sh _output/gcc/kgc8632.sys || rc=1
   tests/uefi/run.sh _output/gcc/kgc8632.sys || rc=1
+  tests/usb/run.sh _output/gcc/kgc8632.sys || rc=1
   tests/net/run.sh _output/gcc/kgc8632.sys || rc=1
   tests/ssh/host.sh || rc=1
   tests/ssh/run.sh _output/gcc/kgc8632.sys || rc=1

@@ -8,6 +8,10 @@
  *   AX=DE11h  send the frame at DS:SI, CX bytes (14..1514); CF on error
  *   AX=DE12h  receive: the next frame into ES:DI (CX = room); CX = its
  *             length, 0 if there is none
+ *   AX=DE13h  the driver's state into the monitor's log
+ *   AX=DE14h  the monitor's log: its last BX lines (0: all kept) as text
+ *             into ES:DI (CX = room); CX = bytes (works without a card;
+ *             UEFI boots only, MDLOG.COM shows it)
  * Drivers poll (no interrupts), like the disk drivers. Works on DOS and
  * UEFI boots.
  */
@@ -29,7 +33,13 @@ void nic_register(struct nic *n)
 
 void nic_init(void)
 {
+  if (boot.flags & BOOTF_NO_NET)
+  {
+    kprintf("nic: network drivers skipped (\\MODERNDOS\\NONET)\n");
+    return;
+  }
   e1000_init();
+  yukon2_init();
 }
 
 static void set_cf(struct frame *f, int on)
@@ -47,6 +57,12 @@ void nic_api(struct frame *f)
   uint8_t *buf;
   int len;
 
+  if (AL(f) == 0x14)
+  {
+    CX(f) = (uint16_t)fbcon_log_copy((char *)rm_ptr(f->es, 0) + DI(f), CX(f), BX(f));
+    set_cf(f, !CX(f));
+    return;
+  }
   if (!n)
   {
     set_cf(f, 1);
@@ -72,6 +88,11 @@ void nic_api(struct frame *f)
       buf = rm_ptr(f->es, 0) + DI(f);
       len = n->recv(n, buf, CX(f));
       CX(f) = (uint16_t)(len > 0 ? len : 0);
+      set_cf(f, 0);
+      return;
+    case 0x13:
+      if (n->debug)
+        n->debug(n);
       set_cf(f, 0);
       return;
   }
