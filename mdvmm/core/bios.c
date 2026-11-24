@@ -291,6 +291,10 @@ static void vbe_mode_info(struct frame *f)
 
 static void graphics(int on)
 {
+  /* a session in the background (a terminal window, a remote shell) only
+     changes its own screen memory, not the display */
+  if (!vm_has_focus())
+    return;
   if (on == gfx_mode)
     return;
   gfx_mode = on;
@@ -712,6 +716,85 @@ static int nhd;
 static uint8_t hd_status;
 static uint32_t stage[STAGE_PAGES];     /* pool pages for transfers */
 
+/* DOS knows MBR partition tables only. For a disk with a GUID partition
+   table (GPT: every UEFI machine's system disk) it gets a made-up MBR that
+   lists the disk's FAT partitions (up to four; the EFI system partition is
+   one), so they become DOS drives. The real sector 0 is not written. */
+static void gpt_probe(struct disk *d)
+{
+  uint8_t *s = pool_ptr(stage[0]), *mbr;
+  uint32_t entries, esize, i, found = 0;
+  uint64_t elba;
+
+  d->mbr = 0;
+  if (d->rw(d, 0, 2, stage, 0) || memcmp(s + 512, "EFI PART", 8))
+    return;
+  elba = *(uint64_t *)(s + 512 + 72);
+  entries = *(uint32_t *)(s + 512 + 80);
+  esize = *(uint32_t *)(s + 512 + 84);
+  if (esize < 128 || esize > 512 || 512 % esize || entries > 128)
+    return;
+  {
+    uint32_t page = page_alloc();
+    if (!page)
+      return;
+    mbr = pool_ptr(page);
+  }
+  memset(mbr, 0, 512);
+  mbr[510] = 0x55;
+  mbr[511] = 0xaa;
+  for (i = 0; i < entries && found < 4; i++)
+  {
+    uint8_t e[512], type = 0;
+    uint64_t first, last, size;
+    uint32_t k;
+    const uint8_t *b;
+
+    if (i % (512 / esize) == 0 && d->rw(d, elba + i / (512 / esize), 1, stage, 0))
+      break;
+    memcpy(e, s + (i % (512 / esize)) * esize, esize);
+    for (k = 0; k < 16 && !e[k]; k++)
+      ;
+    if (k == 16)
+      continue;                         /* unused entry */
+    first = *(uint64_t *)(e + 32);
+    last = *(uint64_t *)(e + 40);
+    size = last - first + 1;
+    if (last < first || last >= d->sectors || (first >> 32) || (size >> 32))
+      continue;
+    /* a FAT file system? (its boot sector says) */
+    if (d->rw(d, first, 1, stage + 1, 0))
+      continue;
+    b = pool_ptr(stage[1]);
+    if (b[510] != 0x55 || b[511] != 0xaa)
+      continue;
+    if (!memcmp(b + 0x52, "FAT32", 5))
+      type = 0x0c;
+    else if (!memcmp(b + 0x36, "FAT16", 5))
+      type = size >= 65536 ? 0x0e : 0x04;
+    else if (!memcmp(b + 0x36, "FAT12", 5))
+      type = 0x01;
+    else
+      continue;
+    b = mbr + 446 + found * 16;
+    ((uint8_t *)b)[1] = 0xfe;           /* CHS: use the LBA fields */
+    ((uint8_t *)b)[2] = 0xff;
+    ((uint8_t *)b)[3] = 0xff;
+    ((uint8_t *)b)[4] = type;
+    ((uint8_t *)b)[5] = 0xfe;
+    ((uint8_t *)b)[6] = 0xff;
+    ((uint8_t *)b)[7] = 0xff;
+    *(uint32_t *)(b + 8) = (uint32_t)first;
+    *(uint32_t *)(b + 12) = (uint32_t)size;
+    kprintf("bios:   GPT partition %u: FAT%s, %u MB at sector %u\n", i + 1,
+            type == 0x0c ? "32" : type == 0x01 ? "12" : "16", (uint32_t)(size >> 11), (uint32_t)first);
+    found++;
+  }
+  d->mbr = mbr;
+  if (!found)
+    kprintf("bios:   GPT without FAT partitions: no DOS drives on this disk\n");
+}
+
 void disk_register(struct disk *d)
 {
   int i;
@@ -725,6 +808,7 @@ void disk_register(struct disk *d)
   hds[nhd] = d;
   kprintf("bios: hard disk %02xh: %s\n", 0x80 + nhd, d->model);
   nhd++;
+  gpt_probe(d);
 }
 
 static uint32_t hd_cyls(struct disk *d)
@@ -745,6 +829,8 @@ static int hd_transfer(struct disk *d, uint64_t lba, uint32_t n, uint8_t *buf, i
   *done = 0;
   if (write && !(boot.flags & BOOTF_DISK_WRITE))
     return 0x03;                        /* write protected */
+  if (write && d->mbr && lba == 0)
+    return 0x03;                        /* the made-up MBR of a GPT disk */
   while (n && !err)
   {
     uint32_t k = n > DISK_MAX_SECTORS ? DISK_MAX_SECTORS : n, i, bytes = k * 512;
@@ -758,6 +844,8 @@ static int hd_transfer(struct disk *d, uint64_t lba, uint32_t n, uint8_t *buf, i
     if (!write)
       for (i = 0; i < bytes; i += 4096)
         memcpy(buf + i, pool_ptr(stage[i / 4096]), bytes - i < 4096 ? bytes - i : 4096);
+    if (!write && d->mbr && lba == 0)
+      memcpy(buf, d->mbr, 512);         /* GPT disk: sector 0 for DOS */
     lba += k;
     buf += bytes;
     n -= k;
@@ -1152,6 +1240,17 @@ int bios_bp(struct frame *f, uint16_t ip)
     }
     xhci_poll();                        /* USB keyboards */
     uhci_poll();
+    /* a trial boot that nobody confirms within ten minutes: back to the
+       installed system */
+    if ((boot.flags & BOOTF_TRIAL) && !trial_confirmed)
+    {
+      static uint32_t trial_ticks;
+      if (++trial_ticks == (boot.flags & BOOTF_TRIAL_FAST ? 1092u : 10920u))
+      {
+        kprintf("trial boot: not confirmed in time, restarting\n");
+        machine_reset();
+      }
+    }
     usbkbd_tick();
     fbcon_update();
     f->eip++;
@@ -1286,6 +1385,7 @@ void bios_init(void)
                                            have none: the status reads FFh) */
   apic_setup();                         /* PIC interrupts to the CPU, 8254 on IRQ0 */
   timer_selftest();
+  nic_init();                           /* network cards (their clock needs the timer) */
 
   serial_init();
   disk_init();
@@ -1296,7 +1396,7 @@ void bios_init(void)
   BDA8(0x75) = (uint8_t)nhd;            /* number of hard disks */
   if (nhd)
     kprintf("bios: hard disks are %s\n", boot.flags & BOOTF_DISK_WRITE ? "writable" :
-            "read-only (no \\MODERNDOS\\DISKRW on the boot volume)");
+            "read-only (no \\MDOS\\DISKRW on the boot volume)");
   active = 1;
 
   /* boot: the disk image's boot sector at 0000:7C00, DL = drive */
@@ -1311,12 +1411,14 @@ void bios_init(void)
   boot.eflags = EFL_IF;
   kprintf("bios: %u KB conventional memory, %u KB extended at %08x, booting the disk image\n",
           conv, boot.xms_size / 1024, boot.xms_phys);
+  if (boot.flags & BOOTF_TRIAL)
+    kprintf("bios: TRIAL boot: restart in ten minutes unless confirmed (MDSYS KEEP)\n");
 
-  /* the log leaves the screen; \MODERNDOS\BOOTWAIT keeps it for a while
+  /* the log leaves the screen; \MDOS\BOOTWAIT keeps it for a while
      (to read or photograph it on a machine that does not get further) */
   if (boot.flags & BOOTF_LOG_PAUSE)
   {
-    kprintf("bios: the log stays on the screen for 15 seconds (\\MODERNDOS\\BOOTWAIT)\n");
+    kprintf("bios: the log stays on the screen for 15 seconds (\\MDOS\\BOOTWAIT)\n");
     pit_wait(273);
   }
   fbcon_text();

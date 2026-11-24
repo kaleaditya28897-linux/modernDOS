@@ -22,6 +22,8 @@
 #define BOOTF_DISK_WRITE 0x1   /* UEFI: native hard disks may be written */
 #define BOOTF_LOG_PAUSE  0x2   /* UEFI: keep the boot log on the screen for a while */
 #define BOOTF_NO_NET     0x4   /* UEFI: do not start the network card drivers */
+#define BOOTF_TRIAL      0x8   /* UEFI: a trial boot: restart unless it is confirmed */
+#define BOOTF_TRIAL_FAST 0x10  /* ... after one minute, not ten (tests) */
 
 #define FB_RGBX    0        /* GOP PixelRedGreenBlueReserved8BitPerColor */
 #define FB_BGRX    1        /* GOP PixelBlueGreenRedReserved8BitPerColor */

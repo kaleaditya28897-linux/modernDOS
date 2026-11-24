@@ -124,6 +124,20 @@ struct widget *ui_menubar(struct ui *ui, const struct ui_menu *menus, int n, ui_
   return wd;
 }
 
+struct widget *ui_canvas(struct ui *ui, int x, int y, int w, int h,
+                         void (*paint)(struct widget *w, struct surface *s),
+                         int (*input)(struct widget *w, const struct event *e))
+{
+  struct widget *wd = add(ui, UI_CANVAS, x, y, w, h, 0);
+
+  if (wd)
+  {
+    wd->paint = paint;
+    wd->input = input;
+  }
+  return wd;
+}
+
 void ui_set_text(struct widget *w, const char *text)
 {
   strncpy(w->text, text, sizeof(w->text) - 1);
@@ -559,6 +573,16 @@ static void draw_widget(struct surface *s, struct widget *w, int focused)
 
   switch (w->type)
   {
+    case UI_CANVAS:
+      if (w->paint)
+      {
+        surface_clip(s, w->x, w->y, w->w, w->h);
+        w->paint(w, s);
+        surface_noclip(s);
+        if (focused)
+          draw_frame(s, w->x, w->y, w->w, w->h, frame);
+      }
+      break;
     case UI_LABEL:
       draw_text(s, w->x, w->y, w->text, w->disabled ? C_INK_DIM : C_INK, TEXT_TRANSPARENT);
       break;
@@ -950,6 +974,8 @@ static int key(struct ui *ui, const struct event *e)
       return text_key(w, e);
     case UI_EDIT:
       return edit_key(w, e);
+    case UI_CANVAS:
+      return w->input ? w->input(w, e) : 0;
   }
   return 0;
 }
@@ -976,6 +1002,10 @@ static int mouse_down(struct ui *ui, const struct event *e)
     ui->focus = w;
   switch (w->type)
   {
+    case UI_CANVAS:
+      if (w->input)
+        w->input(w, e);
+      break;
     case UI_BUTTON:
       ui->pressed = w;
       break;

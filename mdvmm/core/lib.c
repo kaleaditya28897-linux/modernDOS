@@ -121,8 +121,38 @@ void kprintf(const char *fmt, ...)
   va_end(ap);
 }
 
+/* a trial boot (BOOTF_TRIAL) was confirmed: it may stay */
+int trial_confirmed;
+
+/* restart the machine: reset control register, keyboard controller,
+   triple fault */
+void machine_reset(void)
+{
+  static const struct { uint16_t limit; uint32_t base; } __attribute__((packed)) no_idt = { 0, 0 };
+
+  __asm__ volatile("cli");
+  outb(0xcf9, 0x02);
+  udelay(50);
+  outb(0xcf9, 0x06);
+  udelay(50000);
+  outb(0x64, 0xfe);
+  udelay(50000);
+  __asm__ volatile("lidt %0; int3" :: "m"(no_idt));
+  for (;;)
+    ;
+}
+
 static void halt_forever(void)
 {
+  /* an unconfirmed trial boot must not strand the machine: leave the
+     message on the screen for a minute, then restart (into the installed
+     system) */
+  if ((boot.flags & BOOTF_TRIAL) && !trial_confirmed)
+  {
+    kprintf("trial boot: restarting in 60 seconds\n");
+    udelay(60000000);
+    machine_reset();
+  }
   for (;;)
     __asm__ volatile("cli; hlt");
 }

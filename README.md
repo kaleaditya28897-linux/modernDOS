@@ -13,8 +13,8 @@ INT 21h, INT 2Fh, program loading (EXEC) and the DOS version numbers reported by
 | M2 | MDVMM supervisor: 32-bit V86 monitor + DPMI host, multiple DOS sessions (`docs/mdvmm.md`) | done |
 | M3 | UEFI boot with native drivers (GOP display, AHCI/NVMe disks, USB input) | done: DOS boots on UEFI with a virtual BIOS, XMS, DPMI, sessions, AHCI/NVMe disks, USB keyboards (`docs/mdvmm.md`) |
 | M4 | Original desktop GUI + widget toolkit (32-bit DPMI) | done: VBE graphics, mouse, window manager, widget toolkit, desktop shell MDDESK on both boot paths (`docs/gui.md`) |
-| M5 | Native apps: file manager, editor, settings, terminal (DOS session in a window) | in progress: file manager, text editor, settings (M5.1-M5.3, `docs/apps.md`) |
-| M6 | Networking: TCP/IP, sockets API, package manager, browser | planned |
+| M5 | Native apps: file manager, editor, settings, terminal (DOS session in a window) | done: file manager, text editor, settings, terminal (`docs/apps.md`) |
+| M6 | Networking: TCP/IP, sockets API, package manager, browser | done (first versions): network cards through iPXE's drivers, packet driver, Watt-32 TCP/IP and sockets, SSH server and client (shell, sftp, scp), install on a disk and remote updates, package manager `PKG` with signed repositories, a text-layout web browser in the desktop (http only) (`docs/network.md`, `docs/apps.md`) |
 
 ### Trying it
 Releases have a bootable ISO (alpha, tested in QEMU only): write it to a
@@ -25,7 +25,8 @@ off, or boot it from CD on a BIOS PC. See `release/README.TXT`.
 ```
 scripts/mdbuild.sh      # builds the GCC (reference) and Open Watcom kernels, MDVMM.COM, BOOTX64.EFI, mdgui
 scripts/mkiso.sh        # the release ISO: _output/release/modernDOS-<version>.iso
-scripts/mdtest.sh       # QEMU: boot tests, LFN API + DJGPP libc, MDVMM (DPMI, sessions, graphics), UEFI boot, ISO
+scripts/mdtest.sh       # QEMU: boot tests, LFN API + DJGPP libc, MDVMM (DPMI, sessions, graphics), UEFI boot,
+                        # USB, network, SSH, install and update, ISO
 ```
 
 The upstream FreeDOS README follows.

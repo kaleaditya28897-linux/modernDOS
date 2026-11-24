@@ -1,6 +1,6 @@
 /* BOOTX64.EFI - UEFI loader for the modernDOS virtual machine monitor
  *
- * Reads the DOS boot disk image \MODERNDOS\BOOT.IMG from the boot volume,
+ * Reads the DOS boot disk image \MDOS\BOOT.IMG from the boot volume,
  * takes the GOP framebuffer and a memory pool below 4GB, copies the MDVMM
  * core (embedded, start.asm) into the pool, exits boot services and starts
  * the core in 32-bit protected mode (enter_core, start.asm). The core then
@@ -10,18 +10,20 @@
  * load the image anywhere.
  */
 #include "efi.h"
+#include "loader.h"
 #include "bootinfo.h"
 
 #define POOL_MB_MAX   32
 #define POOL_MB_MIN   8
 #define XMS_MB_MAX    64              /* DOS extended memory */
 #define XMS_MB_MIN    1
-#define BOOT_IMAGE    u"\\MODERNDOS\\BOOT.IMG"
-#define DISK_RW_FILE  u"\\MODERNDOS\\DISKRW"  /* present: disks writable */
-#define BOOTWAIT_FILE u"\\MODERNDOS\\BOOTWAIT" /* present: the core's log stays a while */
-#define FBPROBE_FILE  u"\\MODERNDOS\\FBPROBE"  /* present: probe the framebuffer (tests) */
-#define NONET_FILE    u"\\MODERNDOS\\NONET"    /* present: no network card drivers */
-#define LOG_FILE      u"\\MODERNDOS\\BOOTLOG.TXT"
+#define BOOT_IMAGE    u"\\MDOS\\BOOT.IMG"
+#define TRIAL_IMAGE   u"\\MDOS\\TRY\\BOOT.IMG"
+#define DISK_RW_FILE  u"\\MDOS\\DISKRW"  /* present: disks writable */
+#define BOOTWAIT_FILE u"\\MDOS\\BOOTWAIT" /* present: the core's log stays a while */
+#define FBPROBE_FILE  u"\\MDOS\\FBPROBE"  /* present: probe the framebuffer (tests) */
+#define NONET_FILE    u"\\MDOS\\NONET"    /* present: no network card drivers */
+#define LOG_FILE      u"\\MDOS\\BOOTLOG.TXT"
 
 extern const uint8_t core_image[], core_image_end[];
 void enter_core(uint64_t low, uint64_t bootinfo, uint64_t pool) __attribute__((noreturn));
@@ -39,8 +41,6 @@ static EFI_GUID conctl_guid = { 0xf42f7782, 0x012e, 0x4c12, { 0x99, 0x56, 0x49, 
 static EFI_GUID acpi20_guid = { 0x8868e871, 0xe4f1, 0x11d3, { 0xbc, 0x22, 0x00, 0x80, 0xc7, 0x3c, 0x88, 0x81 } };
 
 /* the compiler may emit calls to these */
-void *memcpy(void *d, const void *s, size_t n);
-void *memset(void *d, int c, size_t n);
 void *memcpy(void *d, const void *s, size_t n)
 {
   uint8_t *dp = d;
@@ -67,13 +67,13 @@ static int guid_eq(const EFI_GUID *a, const EFI_GUID *b)
   return 1;
 }
 
-/* everything printed is also kept for \MODERNDOS\BOOTLOG.TXT: on some
+/* everything printed is also kept for \MDOS\BOOTLOG.TXT: on some
    machines (Apple) the firmware's text console may not be visible */
 static char logbuf[6000];
 static UINTN loglen;
 static EFI_HANDLE img;
 
-static void print(const CHAR16 *s)
+void print(const CHAR16 *s)
 {
   const CHAR16 *c;
 
@@ -83,7 +83,7 @@ static void print(const CHAR16 *s)
   st->ConOut->OutputString(st->ConOut, (CHAR16 *)s);
 }
 
-static void print_dec(uint64_t v)
+void print_dec(uint64_t v)
 {
   CHAR16 buf[24];
   int i = 23;
@@ -96,7 +96,7 @@ static void print_dec(uint64_t v)
 }
 
 /* write the log so far to the boot volume (if it is writable) */
-static void save_log(void)
+void save_log(void)
 {
   EFI_LOADED_IMAGE_PROTOCOL *li;
   EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *fs;
@@ -118,7 +118,7 @@ static void save_log(void)
   root->Close(root);
 }
 
-static void print_hex(uint64_t v)
+void print_hex(uint64_t v)
 {
   CHAR16 buf[19];
   int i;
@@ -176,7 +176,7 @@ static EFI_STATUS load_file(EFI_HANDLE image, const CHAR16 *name, uint64_t *addr
       (s = fs->OpenVolume(fs, &root)))
     return fail(u"cannot open the boot volume", s);
   if ((s = root->Open(root, &file, (CHAR16 *)name, EFI_FILE_MODE_READ, 0)))
-    return fail(u"cannot open \\MODERNDOS\\BOOT.IMG", s);
+    return fail(u"cannot open \\MDOS\\BOOT.IMG", s);
   file->SetPosition(file, ~0ull);
   file->GetPosition(file, size);
   file->SetPosition(file, 0);
@@ -576,6 +576,12 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *systab)
   print_dec(st->Hdr.Revision & 0xffff);
   print(u"\r\n");
 
+  /* a new build waiting to be tried once? (does not return if started) */
+  trial_boot(image, st);
+  if (is_trial(image, st))
+    print(u"This is a TRIAL boot of \\MDOS\\TRY: confirm it with MDSYS KEEP, or the\r\n"
+          u"machine restarts into the installed system after ten minutes.\r\n");
+
   /* the hardware report, first: it is most useful when something fails */
   {
     EFI_LOADED_IMAGE_PROTOCOL *li;
@@ -586,7 +592,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *systab)
         !fs->OpenVolume(fs, &root))
     {
       if (!hwinfo_write(image, st, root))
-        print(u"Hardware report written to \\MODERNDOS\\HWINFO.TXT\r\n");
+        print(u"Hardware report written to \\MDOS\\HWINFO.TXT\r\n");
       else
         print(u"Hardware report not written (read-only boot medium?)\r\n");
       root->Close(root);
@@ -595,8 +601,10 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *systab)
       print(u"Hardware report not written: cannot open the boot volume\r\n");
   }
   save_log();
+  if (!is_trial(image, st))
+    install_offer(image, st);           /* a stick with \MDOS\INSTALL */
 
-  if (load_file(image, BOOT_IMAGE, &rd_addr, &rd_size))
+  if (load_file(image, is_trial(image, st) ? TRIAL_IMAGE : BOOT_IMAGE, &rd_addr, &rd_size))
     return 1;
 
   /* memory pool for the core: below 4GB */
@@ -648,18 +656,20 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *systab)
   if (file_exists(image, DISK_RW_FILE))
     bi->flags |= BOOTF_DISK_WRITE;
   else
-    print(u"Hard disks are read-only (no \\MODERNDOS\\DISKRW).\r\n");
+    print(u"Hard disks are read-only (no \\MDOS\\DISKRW).\r\n");
   bi->xms_phys = (uint32_t)xms;
   bi->xms_size = xms_mb << 20;
+  if (is_trial(image, st))
+    bi->flags |= BOOTF_TRIAL | (file_exists(image, u"\\MDOS\\TRY\\FAST") ? BOOTF_TRIAL_FAST : 0);
   if (file_exists(image, NONET_FILE))
   {
     bi->flags |= BOOTF_NO_NET;
-    print(u"Network card drivers are off (\\MODERNDOS\\NONET).\r\n");
+    print(u"Network card drivers are off (\\MDOS\\NONET).\r\n");
   }
   if (file_exists(image, BOOTWAIT_FILE))
   {
     bi->flags |= BOOTF_LOG_PAUSE;
-    print(u"The monitor's log will stay on the screen for a while (\\MODERNDOS\\BOOTWAIT).\r\n");
+    print(u"The monitor's log will stay on the screen for a while (\\MDOS\\BOOTWAIT).\r\n");
   }
   find_framebuffer(bi, file_exists(image, FBPROBE_FILE));
   for (i = 0; i < st->NumberOfTableEntries; i++)

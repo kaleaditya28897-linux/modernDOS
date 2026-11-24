@@ -40,6 +40,10 @@ void fbcon_panic(void)
 {
 }
 
+void ipxenic_init(void)
+{
+}
+
 uint32_t fbcon_log_copy(char *dst, uint32_t room, uint32_t lines)
 {
   (void)dst;

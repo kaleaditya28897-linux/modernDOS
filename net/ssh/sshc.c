@@ -558,6 +558,16 @@ int main(int argc, char **argv)
     slash[1] = 0;
   else
     dir[0] = 0;
+  /* SSHDIR: keys and settings elsewhere (a disk that keeps them) */
+  if (getenv("SSHDIR") && strlen(getenv("SSHDIR")) < sizeof(dir) - 2)
+  {
+    snprintf(dir, sizeof(dir), "%s", getenv("SSHDIR"));
+    for (i = 0; dir[i]; i++)
+      if (dir[i] == '\\')
+        dir[i] = '/';
+    if (i && dir[i - 1] != '/')
+      strcat(dir, "/");
+  }
   plat_prog = "ssh";
   path_of(seed, sizeof(seed), "SEED.BIN");
   path_of(keypath, sizeof(keypath), "ID.KEY");

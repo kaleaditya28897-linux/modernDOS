@@ -89,13 +89,13 @@ printf '@ECHO OFF\r\nA:\\SESSTEST.EXE /BG\r\nECHO done>A:\\BGDONE.TXT\r\n' > bg.
 
 "$NASM" "$TEST/ldosboot/boot.asm" -w-user -I"$TEST/lmacros/" \
   -D_COMPAT_FREEDOS=1 -D_LBA=0 -D_USE_PART_INFO=0 -D_QUERY_GEOMETRY=0 \
-  -D_FAT12 -D_UNIT=00h -o boot.bin
+  -D_FAT12 -D_UNIT=00h -D_CHS_SECTORS=36 -D_CHS_HEADS=2 -o boot.bin
 "$NASM" "$TEST/bootimg/bootimg.asm" -I ./ -I"$TEST/bootimg/" -I"$TEST/lmacros/" \
   -D_PAYLOADFILE="::rename,'$KERNEL',KERNEL.SYS,fdconfig.sys,result.txt" \
   -D_BOOTPATCHFILE="'boot.bin'" \
   -D_WARN_DEFAULT_OFF=1 -D_WARN_TOOMANYFAT=0 -D_WARN_ALIGNDATA=0 \
-  -D_MBR_PART_TYPE=ptFAT12 -D_BPE=12 -D_SPC=1 -D_SPI=2880 \
-  -D_SPF=9 -D_NUMROOT=224 -D_UNIT=00h -o disk.img
+  -D_MBR_PART_TYPE=ptFAT12 -D_BPE=12 -D_SPC=2 -D_SPI=5760 \
+  -D_SPF=9 -D_NUMROOT=224 -D_CHS_SECTORS=36 -D_CHS_HEADS=2 -D_UNIT=00h -o disk.img
 
 export MTOOLS_SKIP_CHECK=1
 mcopy -i disk.img /opt/fdos/bin/command.com ::COMMAND.COM

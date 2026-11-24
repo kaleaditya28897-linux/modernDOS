@@ -103,6 +103,55 @@ def settings(mouse, sock, log, shot):
     time.sleep(0.5)
 
 
+def terminal(mouse, sock, log, shot):
+    """The terminal: a DOS session in a window (UEFI boots with job slots;
+    elsewhere it says why not)."""
+    mouse.click(*point(log, "launcher"))
+    time.sleep(0.5)
+    mouse.click(*point(log, "terminal"))
+    if not wait(log, "MDDESK: term opened", 5):
+        return                                  # "term unavailable": a message window
+    if not wait(log, "MDDESK: term ready", 30):
+        return
+    time.sleep(0.5)
+    type_text(sock, "ECHO Terminal 123\n")
+    wait(log, "MDDESK: term line Terminal 123", 20)
+    time.sleep(1)
+    send(sock, "screendump %s" % shot)
+    time.sleep(1)
+    type_text(sock, "EXIT\n")
+    wait(log, "MDDESK: term closed", 20)
+    time.sleep(0.5)
+
+
+def browser(mouse, sock, log, shot):
+    """The browser (BROWSER=port: a web server at 10.0.2.2:port): the start
+    page, a page by address, a link."""
+    port = os.environ.get("BROWSER")
+    if not port:
+        return
+    mouse.click(*point(log, "launcher"))
+    time.sleep(0.5)
+    mouse.click(*point(log, "browser"))
+    if not wait(log, "MDDESK: browser loaded about:start", 10):
+        return
+    time.sleep(0.5)
+    mouse.click(*point(log, "browser_addr"))
+    for _ in range(len("about:start")):
+        send(sock, "sendkey backspace")
+    type_text(sock, "10.0.2.2:%s/\n" % port)
+    if not wait(log, "title=Test Page", 60):
+        return
+    time.sleep(1)
+    found = re.findall(r"MDDESK: browser link 1 at (\d+),(\d+)", text(log))
+    if found:
+        mouse.click(int(found[-1][0]), int(found[-1][1]))
+        wait(log, "title=Second Page", 60)
+    time.sleep(1)
+    send(sock, "screendump %s" % shot)
+    time.sleep(1)
+
+
 def main():
     log, sock, out = sys.argv[1:4]
     if not wait(log, "MDDESK: ready", 290):
@@ -132,6 +181,10 @@ def main():
     editor(mouse, sock, log, os.path.join(os.path.dirname(out), "editor.ppm"))
     time.sleep(1)
     settings(mouse, sock, log, os.path.join(os.path.dirname(out), "settings.ppm"))
+    time.sleep(1)
+    terminal(mouse, sock, log, os.path.join(os.path.dirname(out), "term.ppm"))
+    time.sleep(1)
+    browser(mouse, sock, log, os.path.join(os.path.dirname(out), "browser.ppm"))
     time.sleep(1)
     mouse.click(*point(log, "launcher"))
     time.sleep(0.5)

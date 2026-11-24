@@ -24,6 +24,7 @@ static int cur_cell = -1, blink;
 static int suspended;                   /* a program owns the framebuffer */
 static int mouse_cell = -1;             /* where the mouse cursor was drawn */
 static uint32_t ticks;
+static uint16_t cursor_shape = 0x0d0e;
 
 /* the monitor's log: the last lines are kept, and drawn while log_on */
 #define LOG_LINES 64
@@ -224,7 +225,7 @@ static void draw_cell(int n, uint16_t v, int cursor, int invert)
   }
   uint32_t x = x0 + (uint32_t)(n % COLS) * 8 * scale;
   uint32_t y = y0 + (uint32_t)(n / COLS) * 16 * scale;
-  uint16_t shape = *(uint16_t *)rm_ptr(0x40, 0x60);
+  uint16_t shape = cursor_shape;
   int cs = shape >> 8 & 0x1f, ce = shape & 0x1f, row, col, sy, sx;
 
   if (shape & 0x2000)
@@ -256,12 +257,17 @@ void fbcon_update(void)
   uint16_t pos;
   int n, c, mc;
   uint8_t active;
+  const uint8_t *fbda;
 
   if (!fb || suspended || log_on)
     return;
-  active = *(uint8_t *)rm_ptr(0x40, 0x62) & 7;
+  /* page, cursor and its shape of the session on the display (not of
+     whichever session happens to run) */
+  fbda = vm_focus_bda();
+  active = fbda[0x62] & 7;
   page = pool_ptr(vram_phys[active]);   /* 4K per text page */
-  pos = *(uint16_t *)rm_ptr(0x40, 0x50 + active * 2);
+  pos = *(uint16_t *)(fbda + 0x50 + active * 2);
+  cursor_shape = *(uint16_t *)(fbda + 0x60);
   c = (pos >> 8) * COLS + (pos & 0xff);
   if ((pos >> 8) >= ROWS || (pos & 0xff) >= COLS)
     c = -1;

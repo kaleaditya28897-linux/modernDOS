@@ -10,6 +10,19 @@ void trap_dispatch(struct frame *f)
 
   if (f->vector == 0xff)
     return;                     /* local APIC spurious interrupt: no EOI */
+  if (f->vector == 2)
+  {
+    /* NMI: on PCs a PCI system error (SERR#) or an I/O channel check.
+       Note it and go on: stopping would hide what the machine was doing. */
+    static int nmis;
+    uint8_t why = inb(0x61);
+    if (nmis++ < 5)
+      kprintf("NMI: port 61h = %02x (%s) at %04x:%08x\n", why,
+              why & 0x80 ? "PCI SERR#" : why & 0x40 ? "I/O check" : "unknown source",
+              f->cs, f->eip);
+    outb(0x61, (why & 0x0f) | 0x0c);    /* clear and disable both sources */
+    return;
+  }
   if (f->vector >= 0x20 && f->vector < 0x30)
   {
     dma_irq();                  /* bounced DMA data before any handler */
@@ -48,8 +61,10 @@ void core_main(struct bootinfo *bi, uint32_t free_phys)
     fbcon_init();               /* the log on the screen from here on */
   dma_init();
   dpmi_init();
-  nic_init();                   /* network cards: both boot paths */
   if (boot.boot_type == BOOT_UEFI)
-    bios_init();                /* no PC BIOS: provide one, boot DOS */
+    bios_init();                /* no PC BIOS: provide one, boot DOS; it
+                                   starts the network cards (after the timer) */
+  else
+    nic_init();
   v86_start();
 }

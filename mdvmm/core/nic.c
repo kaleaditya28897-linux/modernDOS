@@ -1,6 +1,6 @@
 /* MDVMM core - network cards
  *
- * Native drivers (e1000.c, ...) register a `struct nic`; DOS reaches the
+ * Drivers (iPXE's through ipxenic.c, the native e1000.c) register a `struct nic`; DOS reaches the
  * first one through INT 2Fh AH=DEh (PKTDRV.COM turns that into a standard
  * packet driver):
  *   AX=DE10h  info: ES:DI <- 6-byte MAC, AX = MTU (frame bytes without
@@ -12,6 +12,11 @@
  *   AX=DE14h  the monitor's log: its last BX lines (0: all kept) as text
  *             into ES:DI (CX = room); CX = bytes (works without a card;
  *             UEFI boots only, MDLOG.COM shows it)
+ * and the system calls of MDSYS.COM:
+ *   AX=DE15h  state: AX bit 0 = UEFI boot, bit 1 = trial boot, bit 2 = trial
+ *             confirmed
+ *   AX=DE16h  confirm the trial boot (no automatic restart)
+ *   AX=DE17h  restart the machine
  * Drivers poll (no interrupts), like the disk drivers. Works on DOS and
  * UEFI boots.
  */
@@ -21,6 +26,7 @@
 
 static struct nic *nics[MAX_NICS];
 static int nnic;
+static int nic_session;                 /* the session of the packet driver */
 
 void nic_register(struct nic *n)
 {
@@ -35,11 +41,15 @@ void nic_init(void)
 {
   if (boot.flags & BOOTF_NO_NET)
   {
-    kprintf("nic: network drivers skipped (\\MODERNDOS\\NONET)\n");
+    kprintf("nic: network drivers skipped (\\MDOS\\NONET)\n");
     return;
   }
-  e1000_init();
-  yukon2_init();
+  /* UEFI boots: iPXE's drivers (many cards); DOS boots: the small native
+     driver (MDVMM.COM has no room for more) */
+  if (boot.boot_type == BOOT_UEFI)
+    ipxenic_init();
+  else
+    e1000_init();
 }
 
 static void set_cf(struct frame *f, int on)
@@ -57,6 +67,26 @@ void nic_api(struct frame *f)
   uint8_t *buf;
   int len;
 
+  if (AL(f) == 0x15)
+  {
+    AX(f) = (uint16_t)((boot.boot_type == BOOT_UEFI) | (boot.flags & BOOTF_TRIAL ? 2 : 0) |
+                       (trial_confirmed ? 4 : 0));
+    set_cf(f, 0);
+    return;
+  }
+  if (AL(f) == 0x16)
+  {
+    if ((boot.flags & BOOTF_TRIAL) && !trial_confirmed)
+      kprintf("trial boot: confirmed\n");
+    trial_confirmed = 1;
+    set_cf(f, 0);
+    return;
+  }
+  if (AL(f) == 0x17)
+  {
+    kprintf("restart requested\n");
+    machine_reset();
+  }
   if (AL(f) == 0x14)
   {
     CX(f) = (uint16_t)fbcon_log_copy((char *)rm_ptr(f->es, 0) + DI(f), CX(f), BX(f));
@@ -71,6 +101,9 @@ void nic_api(struct frame *f)
   switch (AL(f))
   {
     case 0x10:
+      /* the session that asks (PKTDRV when it installs) gets the frames:
+         copies of the packet driver in sessions forked later do not */
+      nic_session = vm_current();
       memcpy(rm_ptr(f->es, DI(f)), n->mac, 6);
       AX(f) = 1514;
       BX(f) = (uint16_t)(n->link ? n->link(n) : 1);
@@ -86,7 +119,7 @@ void nic_api(struct frame *f)
       return;
     case 0x12:
       buf = rm_ptr(f->es, 0) + DI(f);
-      len = n->recv(n, buf, CX(f));
+      len = vm_current() == nic_session ? n->recv(n, buf, CX(f)) : 0;
       CX(f) = (uint16_t)(len > 0 ? len : 0);
       set_cf(f, 0);
       return;

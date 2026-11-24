@@ -185,6 +185,18 @@ int vm_current(void)
   return cur;
 }
 
+/* does the running session own the display? */
+int vm_has_focus(void)
+{
+  return cur == focus;
+}
+
+/* the BIOS data area of the session on the display */
+uint8_t *vm_focus_bda(void)
+{
+  return bda(focus);
+}
+
 /* set while the DPMI host runs a monitor service for its client with a
    V86 frame that is never entered: switches wait for the next chance */
 int vm_hold;

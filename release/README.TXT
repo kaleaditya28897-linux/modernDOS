@@ -22,19 +22,19 @@ On UEFI, MDVMM starts first and provides the PC BIOS that DOS expects:
 text console on the firmware's framebuffer (GOP, or UGA on older Apple
 firmware), keyboard (PS/2, or USB on xHCI and UHCI controllers, also
 behind hubs), USB mouse (INT 33h), timer, SATA (AHCI) and NVMe disks, VBE
-graphics, extended memory for XMS. DOS then boots from \MODERNDOS\BOOT.IMG (drive A:, a RAM
+graphics, extended memory for XMS. DOS then boots from \MDOS\BOOT.IMG (drive A:, a RAM
 copy: changes to A: are lost at reboot).
 
-Each UEFI boot writes two files to the stick, in \MODERNDOS:
+Each UEFI boot writes two files to the stick, in \MDOS:
   HWINFO.TXT    hardware report (firmware, model, CPU, graphics, PCI)
   BOOTLOG.TXT   what the loader did, up to the start of the monitor
 The monitor then shows its own log on the screen until DOS starts; a file
-\MODERNDOS\BOOTWAIT keeps that log visible for 15 seconds. If a machine
+\MDOS\BOOTWAIT keeps that log visible for 15 seconds. If a machine
 does not boot, these two files and a photo of the screen say why.
 
 Hard disks are READ-ONLY by default. DOS can see FAT partitions on the
 internal disks, including the EFI system partition of an installed OS.
-To allow writes, create a file \MODERNDOS\DISKRW on the boot medium -
+To allow writes, create a file \MDOS\DISKRW on the boot medium -
 at your own risk.
 
 At the DOS prompt
@@ -48,17 +48,24 @@ At the DOS prompt
 
 Network (new, little tested on real machines)
 ---------------------------------------------
-  NET            start the network and the SSH server: job slots for
-                 remote shells, a local prompt on Ctrl+Alt+F4, PKTDRV (a
-                 packet driver on MDVMM's card drivers: Intel e1000,
-                 Marvell Yukon-2), then SSHD. Needs A:\AUTHKEYS.TXT (public
-                 keys, authorized_keys format) or a password (SSHD /PASSWD).
-                 Addresses come from DHCP (A:\WATTCP.CFG).
+  NET            the SSH server, with a local prompt on Ctrl+Alt+F4.
+                 AUTOEXEC.BAT has started the packet driver PKTDRV (on
+                 MDVMM's card drivers: on UEFI boots iPXE's, for most PCI
+                 network cards) and two DOS sessions for remote shells.
+                 Needs AUTHKEYS.TXT (public keys, authorized_keys format)
+                 or a password (SSHD /PASSWD). Addresses come from DHCP
+                 (WATTCP.CFG).
   SSH            SSH client: SSH user@host [command], SSH /KEYGEN
   MDLOG          the monitor's log; MDLOG /N adds the network card's state
+  MDSYS          kind of boot; MDSYS REBOOT restarts the machine
+  PKG            package manager (UEFI boots): PKG UPDATE, LIST, INSTALL
+In the desktop (MDDESK): Terminal (a DOS prompt in a window, UEFI boots)
+and Browser (plain http pages as text).
+A stick made as a personal image offers to install modernDOS on the
+machine's disk; an installed machine is updated over SSH (TRYBOOT, KEEP).
 From another machine: ssh, sftp and scp to the address SSHD prints; DOS
 drives appear as /A, /C, ...
-A file \MODERNDOS\NONET on the stick turns the network card drivers off.
+A file \MDOS\NONET on the stick turns the network card drivers off.
 
 Not yet: starting 32-bit DPMI programs from the desktop or in an SSH
 session (one at a time), USB devices plugged in after the start, USB

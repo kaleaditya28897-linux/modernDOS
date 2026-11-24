@@ -16,6 +16,9 @@ void desk_widget(const char *name, const struct widget *w);   /* test log */
 void files_open(const char *path);      /* file manager */
 void editor_open(const char *path);     /* text editor; 0: a new text */
 void settings_open(void);
+void term_open(void);                   /* a DOS session in a window */
+void term_idle(void);                   /* its screens: call when idle */
+void browser_open(const char *url);     /* web browser; 0: the start page */
 void settings_load(const char *argv0);  /* MDDESK.CFG, applies it */
 
 extern int clock24;                     /* 24 or 12 hour clock */

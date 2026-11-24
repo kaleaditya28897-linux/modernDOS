@@ -31,7 +31,7 @@ MDVMM NEW [command]      start another DOS session running COMSPEC
 
 On a UEFI PC (no CSM), copy `mdvmm/build/BOOTX64.EFI` to
 `\EFI\BOOT\BOOTX64.EFI` on the EFI system partition and a bootable DOS
-floppy image to `\MODERNDOS\BOOT.IMG`. The monitor is then already
+floppy image to `\MDOS\BOOT.IMG`. The monitor is then already
 running when DOS starts; `MDVMM` without arguments (AUTOEXEC.BAT) only
 sets up DOS sessions. See "UEFI boot" below.
 
@@ -166,7 +166,7 @@ back. DPMI clients (IOPL 3) program the controller directly.
 ## UEFI boot
 
 A UEFI machine has no PC BIOS, and DOS needs one. `BOOTX64.EFI` reads
-`\MODERNDOS\BOOT.IMG` from the boot volume and takes the GOP framebuffer,
+`\MDOS\BOOT.IMG` from the boot volume and takes the GOP framebuffer,
 a 32 MB pool below 4 GB and one page below 640K. It then exits boot
 services, leaves long mode (32-bit protected mode, paging off) and starts
 the core like the DOS loader does, with `boot_type = BOOT_UEFI` in
@@ -176,7 +176,7 @@ It also allocates up to 64 MB of contiguous memory below 4 GB as DOS
 extended memory (`xms_phys`/`xms_size`, bootinfo version 4).
 
 Before anything else the loader writes a hardware report,
-`\MODERNDOS\HWINFO.TXT`, to the boot volume if it is writable (a USB
+`\MDOS\HWINFO.TXT`, to the boot volume if it is writable (a USB
 stick, not a CD): firmware vendor and version, SMBIOS model, CPU, GOP
 modes and UGA, every PCI device with its BARs and IRQ line, the EFI
 configuration tables and the memory map (`uefi/hwinfo.c`). It is how

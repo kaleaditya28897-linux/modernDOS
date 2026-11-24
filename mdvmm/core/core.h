@@ -152,6 +152,8 @@ int dpmi_active(void);
 int dpmi_owner(void);
 void dpmi_hwirq(struct frame *f, int irq);
 int vm_current(void);
+int vm_has_focus(void);
+uint8_t *vm_focus_bda(void);
 extern int vm_hold;
 
 /* vm.c */
@@ -208,6 +210,7 @@ struct disk {
   void *drv;
   int (*rw)(struct disk *d, uint64_t lba, uint32_t n, const uint32_t *pages, int write);
   int (*flush)(struct disk *d);
+  uint8_t *mbr;                         /* GPT disk: the MBR DOS gets to see */
 };
 void disk_register(struct disk *d);
 void ahci_init(void);
@@ -235,11 +238,13 @@ struct nic {
   int (*link)(struct nic *n);
   void (*debug)(struct nic *n);         /* optional: its state to the log */
 };
+extern int trial_confirmed;
+void machine_reset(void);
 void nic_register(struct nic *n);
 void nic_init(void);
 void nic_api(struct frame *f);
 void e1000_init(void);
-void yukon2_init(void);
+void ipxenic_init(void);
 
 /* dma.c */
 void dma_init(void);

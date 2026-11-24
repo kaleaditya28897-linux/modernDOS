@@ -48,4 +48,9 @@ COPY watt32.sh /tmp/watt32/
 COPY watt32/ /tmp/watt32/watt32/
 RUN bash /tmp/watt32/watt32.sh && rm -rf /tmp/watt32 /opt/watt32/bin
 
+# iPXE source -> /opt/ipxe: the monitor's network card drivers (pinned,
+# checked; see ipxe.sh and mdvmm/ipxe)
+COPY ipxe.sh /tmp/
+RUN bash /tmp/ipxe.sh && rm /tmp/ipxe.sh
+
 WORKDIR /src

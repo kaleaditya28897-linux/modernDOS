@@ -3,7 +3,7 @@
 #
 # OVMF boots \EFI\BOOT\BOOTX64.EFI from a FAT ESP. The loader starts the
 # MDVMM core, which provides a PC BIOS (text console on the GOP
-# framebuffer, keyboard, timer, INT 13h on \MODERNDOS\BOOT.IMG) and boots
+# framebuffer, keyboard, timer, INT 13h on \MDOS\BOOT.IMG) and boots
 # the modernDOS floppy image in V86 mode. CONFIG.SYS loads HIMEMX on the
 # extended memory the virtual BIOS reports (DOS=HIGH). AUTOEXEC.BAT runs:
 #   MDVMM    - no monitor to load: sets up DOS sessions
@@ -89,6 +89,7 @@ A:\WMTEST.EXE
 IF ERRORLEVEL 1 GOTO END
 A:\UITEST.EXE
 IF ERRORLEVEL 1 GOTO END
+A:\SSHSLOT.COM 2
 A:\MDDESK.EXE /TEST
 IF ERRORLEVEL 1 GOTO END
 A:\MDDESK.EXE /TEST /EXIT
@@ -111,13 +112,13 @@ printf '@ECHO OFF\r\nA:\\SESSTEST.EXE /BG\r\nECHO done>A:\\BGDONE.TXT\r\n' > bg.
 
 "$NASM" "$TEST/ldosboot/boot.asm" -w-user -I"$TEST/lmacros/" \
   -D_COMPAT_FREEDOS=1 -D_LBA=0 -D_USE_PART_INFO=0 -D_QUERY_GEOMETRY=0 \
-  -D_FAT12 -D_UNIT=00h -o boot.bin
+  -D_FAT12 -D_UNIT=00h -D_CHS_SECTORS=36 -D_CHS_HEADS=2 -o boot.bin
 "$NASM" "$TEST/bootimg/bootimg.asm" -I ./ -I"$TEST/bootimg/" -I"$TEST/lmacros/" \
   -D_PAYLOADFILE="::rename,'$KERNEL',KERNEL.SYS,fdconfig.sys" \
   -D_BOOTPATCHFILE="'boot.bin'" \
   -D_WARN_DEFAULT_OFF=1 -D_WARN_TOOMANYFAT=0 -D_WARN_ALIGNDATA=0 \
-  -D_MBR_PART_TYPE=ptFAT12 -D_BPE=12 -D_SPC=1 -D_SPI=2880 \
-  -D_SPF=9 -D_NUMROOT=224 -D_UNIT=00h -o boot.img
+  -D_MBR_PART_TYPE=ptFAT12 -D_BPE=12 -D_SPC=2 -D_SPI=5760 \
+  -D_SPF=9 -D_NUMROOT=224 -D_CHS_SECTORS=36 -D_CHS_HEADS=2 -D_UNIT=00h -o boot.img
 
 export MTOOLS_SKIP_CHECK=1
 mcopy -i boot.img /opt/fdos/bin/command.com ::COMMAND.COM
@@ -138,6 +139,7 @@ mcopy -i boot.img mousetest.exe ::MOUSETEST.EXE
 mcopy -i boot.img wmtest.exe ::WMTEST.EXE
 mcopy -i boot.img uitest.exe ::UITEST.EXE
 mcopy -i boot.img "$ROOT/gui/build/MDDESK.EXE" ::MDDESK.EXE
+mcopy -i boot.img "$ROOT/mdvmm/build/SSHSLOT.COM" ::SSHSLOT.COM
 mcopy -i boot.img bg.bat ::BG.BAT
 mcopy -i boot.img disktest.exe ::DISKTEST.EXE
 
@@ -166,12 +168,12 @@ mcopy -i boot.img linux.txt "::Created On Linux.txt"     # LFNTEST fixture
 echo "== building the EFI system partition"
 dd if=/dev/zero of=esp.img bs=1M count=32 status=none
 mformat -i esp.img -h 64 -s 32 -t 32 ::
-mmd -i esp.img ::/EFI ::/EFI/BOOT ::/MODERNDOS
+mmd -i esp.img ::/EFI ::/EFI/BOOT ::/MDOS
 mcopy -i esp.img "$ROOT/mdvmm/build/BOOTX64.EFI" ::/EFI/BOOT/BOOTX64.EFI
-mcopy -i esp.img boot.img ::/MODERNDOS/BOOT.IMG
+mcopy -i esp.img boot.img ::/MDOS/BOOT.IMG
 printf 'hard disks writable\r\n' > diskrw
-mcopy -i esp.img diskrw ::/MODERNDOS/DISKRW    # else disks are read-only
-mcopy -i esp.img diskrw ::/MODERNDOS/FBPROBE   # the loader probes the framebuffer too
+mcopy -i esp.img diskrw ::/MDOS/DISKRW    # else disks are read-only
+mcopy -i esp.img diskrw ::/MDOS/FBPROBE   # the loader probes the framebuffer too
 
 echo "== booting OVMF in QEMU"
 if [ -n "$SCREEN" ]; then
@@ -251,7 +253,22 @@ mouse_drv=$!
 wm_drv=$!
 (cd "$ROOT/tests/gui" && PYTHONDONTWRITEBYTECODE=1 exec python3 uidrive.py "$WORK/debug.log" "$WORK/mon.sock" "$WORK/ui.ppm") &
 ui_drv=$!
-(cd "$ROOT/tests/gui" && PYTHONDONTWRITEBYTECODE=1 exec python3 deskdrive.py "$WORK/debug.log" "$WORK/mon.sock" "$WORK/desk.ppm") &
+# a small web site for the browser (10.0.2.2:8378 in the guest)
+mkdir -p site/sub
+cat > site/index.html <<'HTML'
+<html><head><title>Test Page</title><style>p { color: red }</style></head>
+<body><h1>modernDOS browser test</h1>
+<p>A paragraph with <b>bold</b> text, an entity &amp; an umlaut: gr&uuml;n, UTF-8: grün.</p>
+<ul><li>first item</li><li><a href="sub/page2.html">the second page</a></li></ul>
+<pre>  preformatted
+    text</pre>
+<script>document.write("not shown")</script>
+<p><a href="http://10.0.2.2:8378/">home</a></p></body></html>
+HTML
+printf '<title>Second Page</title><h2>Second</h2><p>You followed the link. <a href="../index.html">Back home</a></p>' > site/sub/page2.html
+python3 -m http.server 8378 --bind 127.0.0.1 -d site > /dev/null 2>&1 &
+web_pid=$!
+(cd "$ROOT/tests/gui" && BROWSER=8378 PYTHONDONTWRITEBYTECODE=1 exec python3 deskdrive.py "$WORK/debug.log" "$WORK/mon.sock" "$WORK/desk.ppm") &
 desk_drv=$!
 timeout --foreground 300 qemu-system-x86_64 -m 256 -bios "$OVMF" \
   -drive file=esp.img,format=raw,if=ide -nic user,model=e1000 -display none \
@@ -262,7 +279,7 @@ timeout --foreground 300 qemu-system-x86_64 -m 256 -bios "$OVMF" \
   -device qemu-xhci,id=xhci -device usb-kbd,bus=xhci.0 -device usb-mouse,bus=xhci.0 \
   -debugcon file:debug.log -serial file:serial.log -no-reboot \
   -monitor unix:mon.sock,server,nowait $QEMU_EXTRA </dev/null || true
-kill $shot_gfx $mouse_drv $wm_drv $ui_drv $desk_drv 2>/dev/null || true
+kill $shot_gfx $mouse_drv $wm_drv $ui_drv $desk_drv $web_pid 2>/dev/null || true
 kill $keys_pid 2>/dev/null || true
 [ -n "$SCREEN" ] && wait $shot_pid 2>/dev/null || true
 echo "-- debug console"
@@ -280,7 +297,7 @@ for marker in "MDVMM core:" "bios: disk image" "fbcon:" "apic: virtual wire mode
               "SESSIONS: 0 failures" "GFXTEST: text mode again" "ahci: port 0: QEMU HARDDISK" \
               "bios: hard disks are writable" \
               "nvme: namespace 1: 96 MB" "DISKTEST: 0 failures" \
-              "disk test on D:" "nic: Intel e1000" "Packet driver at INT 60h" "netchk: ARP reply from 10.0.2.2" "xhci: port [0-9]*: keyboard" "xhci: port [0-9]*: mouse" "mouse: first report" "bios: mouse driver installed" \
+              "disk test on D:" "nic: .* (iPXE)" "Packet driver at INT 60h" "netchk: ARP reply from 10.0.2.2" "xhci: port [0-9]*: keyboard" "xhci: port [0-9]*: mouse" "mouse: first report" "bios: mouse driver installed" \
               "usbkbd: first key report"; do
   if grep -q "$marker" debug.log; then echo "  ok   log: $marker"; else
     echo "  FAIL log missing: $marker"; fail=1; fi
@@ -291,7 +308,7 @@ for marker in "modernDOS kernel" "Hello from DOS on UEFI" "UEFI BOOT: success" \
     echo "  FAIL screen missing: $marker"; fail=1; fi
 done
 # the loader's hardware report on the ESP
-mtype -i esp.img ::/MODERNDOS/HWINFO.TXT 2>/dev/null | tr -d '\r' > hwinfo.txt || true
+mtype -i esp.img ::/MDOS/HWINFO.TXT 2>/dev/null | tr -d '\r' > hwinfo.txt || true
 echo "-- HWINFO.TXT (start)"; head -12 hwinfo.txt
 for marker in "Firmware: " "System: " "CPU: " "GOP: mode" "PCI devices" "  00:00.0  8086:" "Usable memory: " "End of report"; do
   if grep -q "$marker" hwinfo.txt; then echo "  ok   hwinfo: $marker"; else
@@ -299,7 +316,7 @@ for marker in "Firmware: " "System: " "CPU: " "GOP: mode" "PCI devices" "  00:00
 done
 # the loader's own log, and its framebuffer probe (drawn markers found in
 # the display's memory) against what GOP reports
-mtype -i esp.img ::/MODERNDOS/BOOTLOG.TXT 2>/dev/null | tr -d '\r' > bootlog.txt || true
+mtype -i esp.img ::/MDOS/BOOTLOG.TXT 2>/dev/null | tr -d '\r' > bootlog.txt || true
 echo "-- BOOTLOG.TXT"; sed 's/^/   /' bootlog.txt
 for marker in "Hardware report written" "Memory: disk image at" "Graphics (GOP)" "Starting the monitor"; do
   if grep -q "$marker" bootlog.txt; then echo "  ok   bootlog: $marker"; else
@@ -339,6 +356,6 @@ python3 "$ROOT/tests/gui/gfxcheck.py" gfx.ppm debug.log || fail=1
 python3 "$ROOT/tests/gui/mousecheck.py" debug.log mouse.ppm || fail=1
 python3 "$ROOT/tests/gui/wmcheck.py" debug.log wm.ppm || fail=1
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT/tests/gui/uicheck.py" debug.log ui.ppm || fail=1
-PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT/tests/gui/deskcheck.py" debug.log desk.ppm || fail=1
+TERMINAL=1 BROWSER=8378 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT/tests/gui/deskcheck.py" debug.log desk.ppm || fail=1
 [ -n "$SHOTS" ] && cp ./*.ppm "$SHOTS"/ 2>/dev/null || true    # keep the screenshots
 if [ $fail = 0 ]; then echo "UEFI TEST: success"; else echo "UEFI TEST: failure"; exit 1; fi

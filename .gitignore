@@ -68,4 +68,5 @@ test/result.txt
 mdvmm/build/
 gui/build/
 net/ssh/build/
+net/pkg/build/
 __pycache__/

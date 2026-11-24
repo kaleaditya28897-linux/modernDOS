@@ -1,0 +1,33 @@
+# iPXE network drivers built into the monitor (paths under iPXE's src/),
+# one per line.
+# Marvell Yukon-2 (88E80xx, Intel Macs and many notebooks) and Yukon
+drivers/net/sky2.c
+drivers/net/skge.c
+# Intel gigabit (8254x "e1000", 8257x/8258x "e1000e", I210/I350 "igb") and
+# 10/100 (8255x)
+drivers/net/intel.c
+drivers/net/eepro100.c
+# Realtek 8139, 8169, 8111/8168
+drivers/net/realtek.c
+# Broadcom BCM57xx "tg3" and BCM44xx
+drivers/net/tg3/tg3.c
+drivers/net/tg3/tg3_hw.c
+drivers/net/tg3/tg3_phy.c
+drivers/net/b44.c
+# Nvidia nForce, Atheros L1E, JMicron, VIA, SiS 190/191, AMD PCnet,
+# National Semiconductor, 3Com 3c90x, IC Plus, Myson, RDC
+drivers/net/forcedeth.c
+drivers/net/atl1e.c
+drivers/net/jme.c
+drivers/net/rhine.c
+drivers/net/velocity.c
+drivers/net/sis190.c
+drivers/net/pcnet32.c
+drivers/net/natsemi.c
+drivers/net/3c90x.c
+drivers/net/icplus.c
+drivers/net/myson.c
+drivers/net/rdc.c
+# virtual machines: virtio, VMware
+drivers/net/virtio-net.c
+drivers/net/vmxnet3.c

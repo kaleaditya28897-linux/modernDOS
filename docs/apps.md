@@ -11,7 +11,7 @@ it, each in its own windows. They are started from the launcher.
 | M5.1 file manager | working: browse folders with long file names, open folders and programs, new folder, rename, delete |
 | M5.2 text editor | working: multi-line editing widget, editor with File menu, Ctrl+S, opened from Files |
 | M5.3 settings | working: background, accent colour, 12/24-hour clock, mouse speed; live, saved in MDDESK.CFG |
-| M5.4 terminal (a DOS session in a window) | planned: needs MDVMM sessions while a DPMI client runs, and a session screen/keyboard API |
+| M5.4 terminal (a DOS session in a window) | working on UEFI boots: a job slot's session runs COMMAND.COM, its text screen is drawn in the window, the window's keys are typed into it (`gui/desk/term.c`) |
 
 ## Files
 
@@ -82,3 +82,42 @@ disk image afterwards. Then Settings: Ocean, Orange, 12-hour clock, Save;
 AUTOEXEC.BAT then starts `MDDESK /TEST /EXIT`, which must load the same
 settings. `files.ppm`, `editor.ppm` and `settings.ppm` (with
 `SHOTS=dir`) show the applications.
+
+## Terminal
+
+`gui/desk/term.c`. Launcher > Terminal opens a window with a DOS prompt.
+
+- The desktop is the one DPMI program; MDVMM keeps the other DOS sessions
+  running beside it. The terminal takes a *job slot*: a session started by
+  `SSHSLOT.COM` before the desktop (AUTOEXEC.BAT does), which waits for
+  work. The same slots serve remote shells of the SSH server.
+- The window shows the session's 80x25 text screen (monitor call INT 2Fh
+  AX=DE08h, about 20 times a second, changed cells only) in CGA colours
+  with the cursor; keys go into the session's BIOS keyboard buffer
+  (AX=DE09h). `EXIT` closes the window; closing the window sends Ctrl+C
+  and `EXIT` to the shell.
+- UEFI boots only: there MDVMM's BIOS writes a background session's text
+  to that session's screen memory. On a DOS boot the machine's own video
+  BIOS would write to the real display, so the launcher item says so.
+- Programs in the terminal are real mode DOS programs; 32-bit DPMI
+  programs need the DPMI host, which the desktop is using.
+
+## Browser
+
+`gui/desk/browser.c`. Launcher > Browser. An address field with Go and
+Back, the page below.
+
+- Pages are laid out as text in the window's fixed-width font: headings,
+  paragraphs, line breaks, lists, links (underlined, click to follow),
+  preformatted text, rules, table rows, placeholders for images and form
+  fields, character entities, UTF-8 shown in code page 437. Scripts and
+  style sheets are skipped.
+- Keys in the page: Up, Down, PgUp, PgDn, Space, Home, End; Backspace
+  goes back.
+- `http://` only: there is no TLS yet, so most of today's web is out of
+  reach; the start page lists a few plain http places.
+- The network is Watt-32 through the packet driver (`PKTDRV`, loaded by
+  AUTOEXEC.BAT before the desktop); loading a page blocks the desktop
+  until it is there.
+- The page view is a `UI_CANVAS` widget (`ui_canvas()` in mdgui): an
+  area a program draws and handles itself.

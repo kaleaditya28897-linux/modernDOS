@@ -19,17 +19,21 @@ B       = build
 # core objects; the UEFI core adds the virtual BIOS and native drivers,
 # the DOS core (MDVMM.COM, 64 KB limit) has stubs instead
 COBJS   = $(B)/entry.o $(B)/main.o $(B)/lib.o $(B)/mm.o $(B)/cpu.o $(B)/v86.o $(B)/dpmi.o \
-          $(B)/vm.o $(B)/dma.o $(B)/pci.o $(B)/nic.o $(B)/e1000.o $(B)/yukon2.o
+          $(B)/vm.o $(B)/dma.o $(B)/pci.o $(B)/nic.o $(B)/e1000.o
 UEFIOBJS = $(B)/bios.o $(B)/fbcon.o $(B)/font.o $(B)/romimg.o $(B)/ahci.o $(B)/nvme.o \
-          $(B)/xhci.o $(B)/usbkbd.o $(B)/mouse.o $(B)/apic.o $(B)/uhci.o
+          $(B)/xhci.o $(B)/usbkbd.o $(B)/mouse.o $(B)/apic.o $(B)/uhci.o $(B)/ipxenic.o $(B)/ipxe.o
 DOSOBJS = $(B)/nobios.o
 HDRS    = core/core.h include/bootinfo.h
+
+# iPXE's network drivers (ipxe/): the pinned source tree of the build image
+IPXE    ?= $(firstword $(wildcard /opt/ipxe ../_output/ext/ipxe/src))
+IPXE_DEBUG ?=
 
 CFLAGS64 = -m64 -std=gnu11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-builtin \
           -fpie -fno-stack-protector -mno-red-zone -mgeneral-regs-only \
           -fno-asynchronous-unwind-tables -fshort-wchar -Iinclude -Iuefi
 
-all: $(B)/MDVMM.COM $(B)/BOOTX64.EFI $(B)/PKTDRV.COM $(B)/SSHSLOT.COM $(B)/MDLOG.COM
+all: $(B)/MDVMM.COM $(B)/BOOTX64.EFI $(B)/PKTDRV.COM $(B)/SSHSLOT.COM $(B)/MDLOG.COM $(B)/MDSYS.COM
 
 $(B):
 	mkdir -p $(B)
@@ -60,7 +64,7 @@ $(B)/%.bin: $(B)/%.elf
 $(B)/MDVMM.COM: loader/loader.asm $(B)/core_dos.bin include/bootinfo.inc
 	$(NASM) $(NFLAGS) -I$(B)/ -f bin -o $@ $<
 
-$(B)/uefi_main.o: uefi/main.c uefi/efi.h include/bootinfo.h | $(B)
+$(B)/uefi_main.o: uefi/main.c uefi/efi.h uefi/loader.h include/bootinfo.h | $(B)
 	$(CC64) $(CFLAGS64) -c -o $@ $<
 
 $(B)/uefi_start.o: uefi/start.asm $(B)/core.bin
@@ -69,9 +73,16 @@ $(B)/uefi_start.o: uefi/start.asm $(B)/core.bin
 $(B)/uefi_hwinfo.o: uefi/hwinfo.c uefi/efi.h | $(B)
 	$(CC64) $(CFLAGS64) -c -o $@ $<
 
-$(B)/BOOTX64.EFI: $(B)/uefi_main.o $(B)/uefi_hwinfo.o $(B)/uefi_start.o uefi/efi.ld
+$(B)/uefi_install.o: uefi/install.c uefi/loader.h uefi/efi.h | $(B)
+	$(CC64) $(CFLAGS64) -c -o $@ $<
+
+$(B)/BOOTX64.EFI: $(B)/uefi_main.o $(B)/uefi_hwinfo.o $(B)/uefi_install.o $(B)/uefi_start.o uefi/efi.ld
 	$(LD64) -m i386pep --subsystem 10 --image-base 0x10000000 -e efi_main --enable-reloc-section -nostdlib \
-	  -T uefi/efi.ld -o $@ $(B)/uefi_main.o $(B)/uefi_hwinfo.o $(B)/uefi_start.o
+	  -T uefi/efi.ld -o $@ $(B)/uefi_main.o $(B)/uefi_hwinfo.o $(B)/uefi_install.o $(B)/uefi_start.o
+
+$(B)/ipxe.o: ipxe/glue.c ipxe/glue_data.c ipxe/build.sh ipxe/drivers.list ipxe/core.list ipxe/ipxe.lds \
+            ipxe/overlay/config/defaults/mdvmm.h | $(B)
+	bash ipxe/build.sh $(IPXE) $@ $(IPXE_DEBUG)
 
 $(B)/PKTDRV.COM: pktdrv/pktdrv.asm | $(B)
 	$(NASM) -f bin -o $@ $<
@@ -80,6 +91,9 @@ $(B)/SSHSLOT.COM: sshslot/sshslot.asm | $(B)
 	$(NASM) -f bin -o $@ $<
 
 $(B)/MDLOG.COM: mdlog/mdlog.asm | $(B)
+	$(NASM) -f bin -o $@ $<
+
+$(B)/MDSYS.COM: mdsys/mdsys.asm | $(B)
 	$(NASM) -f bin -o $@ $<
 
 clean:

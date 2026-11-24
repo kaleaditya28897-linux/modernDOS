@@ -5,7 +5,7 @@
  *   SSHD /PASSWD          set the login password (stored hashed)
  *   SSHD /NOPASSWD        remove it (public keys only)
  *
- * Files, in the directory of SSHD.EXE:
+ * Files, in the directory of SSHD.EXE (or in %SSHDIR%):
  *   HOSTKEY.ED    the host's ed25519 key (made on the first start)
  *   AUTHKEYS.TXT  public keys allowed to log in, OpenSSH authorized_keys
  *                 format ("ssh-ed25519 AAAA... comment"), one per line
@@ -561,12 +561,15 @@ static void chan_request(struct conn *c, struct buf *p)
       snprintf(ch->outfile, sizeof(ch->outfile), "%sSSH%05d.OUT", plat_tempdir(),
                (seq++ + (int)plat_ms()) % 100000);
 #ifdef __DJGPP__
-      /* no space before ">": ECHO would write it */
-      snprintf(line, sizeof(line), "%s>%s", cmd, ch->outfile);
+      /* through a second shell: its output handle is inherited by all it
+         runs, also the commands of a batch file (a redirected batch file
+         alone does not pass it on). No space before ">": ECHO would
+         write it. */
+      snprintf(line, sizeof(line), "%%COMSPEC%% /C %s>%s", cmd, ch->outfile);
 #else
       snprintf(line, sizeof(line), "%s > %s", cmd, ch->outfile);   /* sh: "3>" is fd 3 */
 #endif
-      if (strlen(line) < 127 && start_job(c, ch, line))
+      if (strlen(line) < 118 && start_job(c, ch, line))
       {
         ch->type = CH_EXEC;
         plat_log("%s: exec \"%s\" in session %d\n", c->peer, cmd, ch->slot);
@@ -934,6 +937,16 @@ int main(int argc, char **argv)
     slash[1] = 0;
   else
     dir[0] = 0;
+  /* SSHDIR: keys and settings elsewhere (a disk that keeps them) */
+  if (getenv("SSHDIR") && strlen(getenv("SSHDIR")) < sizeof(dir) - 2)
+  {
+    snprintf(dir, sizeof(dir), "%s", getenv("SSHDIR"));
+    for (i = 0; dir[i]; i++)
+      if (dir[i] == '\\')
+        dir[i] = '/';
+    if (i && dir[i - 1] != '/')
+      strcat(dir, "/");
+  }
   path_of(seed, sizeof(seed), "SEED.BIN");
 
   for (i = 1; i < argc; i++)

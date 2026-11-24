@@ -71,9 +71,9 @@ echo "floppy: $(mdir -i disk.img -w :: | wc -w) files, $(mdu -i disk.img -s :: 2
 
 dd if=/dev/zero of=esp.img bs=1M count=16 status=none
 mformat -i esp.img -h 64 -s 32 -t 16 ::
-mmd -i esp.img ::/EFI ::/EFI/BOOT ::/MODERNDOS
+mmd -i esp.img ::/EFI ::/EFI/BOOT ::/MDOS
 mcopy -i esp.img "$ROOT/mdvmm/build/BOOTX64.EFI" ::/EFI/BOOT/BOOTX64.EFI
-mcopy -i esp.img disk.img ::/MODERNDOS/BOOT.IMG
+mcopy -i esp.img disk.img ::/MDOS/BOOT.IMG
 
 OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile="$WORK/known" -o LogLevel=ERROR
       -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=20 -i "$WORK/id" -p $PORT)
@@ -200,7 +200,7 @@ mdel -i client.img ::SSHD.EXE ::SSHSLOT.COM ::AUTOEXEC.BAT
 mcopy -i client.img client.bat ::AUTOEXEC.BAT
 mcopy -i client.img "$ROOT/net/ssh/build/ssh.exe" ::SSH.EXE
 mcopy -i client.img id ::ID.KEY
-mcopy -i esp.img -o client.img ::/MODERNDOS/BOOT.IMG
+mcopy -i esp.img -o client.img ::/MDOS/BOOT.IMG
 
 client() {   # client name -- qemu args
   name=$1; shift

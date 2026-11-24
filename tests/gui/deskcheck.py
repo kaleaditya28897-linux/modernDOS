@@ -43,6 +43,20 @@ def main():
         ("Settings: the clock went to 12 hours", bool(re.search(r"MDDESK: clock \d{1,2}:\d\d [AP]M", log))),
         ("Settings: the next MDDESK loads them",
          "MDDESK: settings loaded background=Ocean accent=Orange clock=12 mouse=Normal" in log),
+        # the terminal: a DOS session in a window where there are job slots
+        # (TERMINAL=1: the UEFI test), a message elsewhere
+        ("Terminal: a DOS session in a window, typed command's output shown, closed by EXIT"
+         if os.environ.get("TERMINAL") else "Terminal: says why it cannot open here",
+         ("MDDESK: term opened in session" in log and "MDDESK: term line Terminal 123" in log
+          and "MDDESK: term closed" in log)
+         if os.environ.get("TERMINAL") else "MDDESK: term unavailable" in log),
+        # the browser, where the test has a web server (BROWSER=port)
+        ("Browser: start page, a page by its address, a link followed"
+         if os.environ.get("BROWSER") else "Browser: not tested on this boot",
+         ("MDDESK: browser loaded about:start" in log
+          and bool(re.search(r"MDDESK: browser loaded http://10\.0\.2\.2:\d+/ title=Test Page lines=\d+ links=2", log))
+          and bool(re.search(r"MDDESK: browser loaded http://10\.0\.2\.2:\d+/sub/page2\.html title=Second Page", log)))
+         if os.environ.get("BROWSER") else True),
         ("Files: gone from the listing",
          bool(re.findall(r"MDDESK: files A:\\ \d+:(.*)", log))
          and "Renamed Dir" not in re.findall(r"MDDESK: files A:\\ \d+:(.*)", log)[-1]),

@@ -54,7 +54,7 @@ class Mouse:
 
 
 KEYS = {" ": "spc", "\n": "ret", "\t": "tab", ".": "dot", ",": "comma", "-": "minus",
-        ":": "shift-semicolon", "\\": "backslash"}
+        ":": "shift-semicolon", "\\": "backslash", "/": "slash"}
 
 
 def type_text(sock, s):

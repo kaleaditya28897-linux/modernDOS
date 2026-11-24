@@ -145,7 +145,7 @@ int wm_desktop_top(void);
 void wm_quit(void);
 
 /* ui.c - widgets in a window */
-enum { UI_LABEL, UI_BUTTON, UI_CHECK, UI_TEXT, UI_LIST, UI_MENUBAR, UI_EDIT };
+enum { UI_LABEL, UI_BUTTON, UI_CHECK, UI_TEXT, UI_LIST, UI_MENUBAR, UI_EDIT, UI_CANVAS };
 
 struct ui;
 struct widget;
@@ -176,6 +176,9 @@ struct widget {
   long last_click;
   void *user;
   struct ui *ui;
+  /* UI_CANVAS: drawn and handled by the program */
+  void (*paint)(struct widget *w, struct surface *s);
+  int (*input)(struct widget *w, const struct event *e);
 };
 
 struct ui *ui_new(struct window *win);  /* takes the window's handler; the
@@ -188,6 +191,12 @@ struct widget *ui_list(struct ui *ui, int x, int y, int w, int h, const char *co
                        ui_action a);
 struct widget *ui_menubar(struct ui *ui, const struct ui_menu *menus, int n, ui_action a);
 void ui_set_text(struct widget *w, const char *text);
+/* an area the program draws itself: paint() draws it (on every redraw of
+   the window), input() gets mouse presses in it and, when it has the
+   focus, keys (client coordinates; return 1 if used) */
+struct widget *ui_canvas(struct ui *ui, int x, int y, int w, int h,
+                         void (*paint)(struct widget *w, struct surface *s),
+                         int (*input)(struct widget *w, const struct event *e));
 /* multi-line text editor; action: the text or the caret changed */
 struct widget *ui_edit(struct ui *ui, int x, int y, int w, int h, ui_action a);
 int edit_set_text(struct widget *w, const char *text, long len);   /* -1: no memory */

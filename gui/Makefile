@@ -24,10 +24,13 @@ $(B)/font.o: ../mdvmm/core/font.c | $(B)
 $(B)/mdgui.o: $(OBJS)
 	$(CC) -r -nostdlib -o $@ $(OBJS)
 
-DESK    = desk/desk.c desk/files.c desk/editor.c desk/settings.c
+DESK    = desk/desk.c desk/files.c desk/editor.c desk/settings.c desk/term.c desk/browser.c
+# the browser's network side: the HTTP client on Watt-32, code page 437
+WATT    = /opt/watt32
+NET     = ../net/pkg/http.c ../net/ssh/console.c ../net/ssh/buf.c
 
-$(B)/MDDESK.EXE: $(DESK) desk/desk.h $(B)/mdgui.o lib/mdgui.h
-	$(CC) $(CFLAGS) -s -o $@ $(DESK) $(B)/mdgui.o
+$(B)/MDDESK.EXE: $(DESK) $(NET) desk/desk.h $(B)/mdgui.o lib/mdgui.h ../net/pkg/http.h
+	$(CC) $(CFLAGS) -I$(WATT)/inc -s -o $@ $(DESK) $(NET) $(B)/mdgui.o -L$(WATT)/lib -lwatt
 
 clean:
 	rm -rf $(B)

@@ -307,9 +307,10 @@ static void open_run(void)
 /* launcher                                                         */
 
 static const char *const launcher_items[] = { "About modernDOS", "Files", "Editor", "Settings",
-                                             "Run...", "Exit to DOS" };
-static const char *const launcher_names[] = { "about", "files", "editor", "settings", "run", "exit" };
-#define NLAUNCH 6
+                                             "Terminal", "Browser", "Run...", "Exit to DOS" };
+static const char *const launcher_names[] = { "about", "files", "editor", "settings", "terminal",
+                                             "browser", "run", "exit" };
+#define NLAUNCH 8
 
 static void launcher_choose(int item, void *user)
 {
@@ -322,8 +323,10 @@ static void launcher_choose(int item, void *user)
     case 1: files_open(0); break;
     case 2: editor_open(0); break;
     case 3: settings_open(); break;
-    case 4: open_run(); break;
-    case 5: quit = 1; break;
+    case 4: term_open(); break;
+    case 5: browser_open(0); break;
+    case 6: open_run(); break;
+    case 7: quit = 1; break;
   }
 }
 
@@ -412,6 +415,7 @@ int main(int argc, char **argv)
       top = wm_top();
       panel_damage();
     }
+    term_idle();                        /* terminal windows follow their sessions */
     wm_update();
     if (!input_poll(&e))
     {

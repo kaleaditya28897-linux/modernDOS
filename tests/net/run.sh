@@ -4,7 +4,8 @@
 # One boot floppy, booted twice: from DOS (SeaBIOS) and from UEFI (OVMF,
 # BOOTX64.EFI). QEMU gives an e1000 on its user network (DHCP, gateway
 # 10.0.2.2 = the container). AUTOEXEC.BAT loads HIMEMX, MDVMM and PKTDRV
-# (the packet driver on MDVMM's e1000 driver), then runs
+# (the packet driver on MDVMM's network card drivers: the native e1000
+# driver on DOS boots, iPXE's drivers on UEFI boots), then runs
 #   NETCHK   - ARP through the packet driver (no TCP/IP stack)
 #   NETTEST  - Watt-32 (DJGPP): DHCP, then a TCP connection to a server
 #              the harness runs here, a line out and a line back
@@ -75,12 +76,12 @@ mcopy -i disk.img "$ROOT/mdvmm/build/SSHSLOT.COM" ::SSHSLOT.COM
 mcopy -i disk.img /opt/cwsdpmi/bin/CWSDPMI.EXE ::CWSDPMI.EXE
 mcopy -i disk.img poweroff.com ::POWEROFF.COM
 
-# the UEFI boot: the same floppy as \MODERNDOS\BOOT.IMG on an ESP
+# the UEFI boot: the same floppy as \MDOS\BOOT.IMG on an ESP
 dd if=/dev/zero of=esp.img bs=1M count=16 status=none
 mformat -i esp.img -h 64 -s 32 -t 16 ::
-mmd -i esp.img ::/EFI ::/EFI/BOOT ::/MODERNDOS
+mmd -i esp.img ::/EFI ::/EFI/BOOT ::/MDOS
 mcopy -i esp.img "$ROOT/mdvmm/build/BOOTX64.EFI" ::/EFI/BOOT/BOOTX64.EFI
-mcopy -i esp.img disk.img ::/MODERNDOS/BOOT.IMG
+mcopy -i esp.img disk.img ::/MDOS/BOOT.IMG
 
 # the server NETTEST talks to (10.0.2.2:PORT from inside QEMU)
 python3 - $PORT <<'PY' &
@@ -123,14 +124,14 @@ run() {   # run name -- qemu args
   fi
   timeout --foreground 240 "$@" -m 128 -display none -no-reboot \
     -monitor unix:mon.sock,server,nowait \
-    -nic user,model=e1000 -debugcon file:debug.log </dev/null || true
+    -nic user,model=${MODEL:-e1000} -debugcon file:debug.log </dev/null || true
   [ -n "$SHOTS" ] && cp debug.log "$SHOTS/${name// /_}.log"
   echo "-- $name"
   grep -a -E "nic:|e1000:|Packet driver|netchk:|NETTEST:|CONTEST:|vm: |dpmi: |PANIC" debug.log | sed 's/\r$//'
   if grep -aq "CONTEST: FAIL" debug.log || ! grep -aq "CONTEST: 0 failures" debug.log; then
     echo "  FAIL $name: remote console (CONTEST)"; fail=1
   else echo "  ok   $name: remote console (CONTEST)"; fi
-  for marker in "nic: Intel e1000" "Packet driver at INT 60h" "netchk: ARP reply from 10.0.2.2" \
+  for marker in "nic: " "Packet driver at INT 60h" "netchk: ARP reply from 10.0.2.2" \
                 "NETTEST: my address 10.0.2.15" "NETTEST: connected to 10.0.2.2" \
                 "NETTEST: reply: hello from the host, you said: hello from modernDOS"; do
     if grep -aq "$marker" debug.log; then echo "  ok   $name: $marker"; else
@@ -142,6 +143,12 @@ echo "== DOS boot"
 run "DOS boot" "$QEMU" -drive file=disk.img,format=raw,if=floppy
 echo "== UEFI boot"
 run "UEFI boot" qemu-system-x86_64 -bios "$OVMF" -drive file=esp.img,format=raw,if=ide
+# UEFI boots use iPXE's drivers: the other network cards QEMU has
+for MODEL in e1000e rtl8139 pcnet virtio-net-pci vmxnet3 i82559er; do
+  echo "== UEFI boot, $MODEL"
+  run "UEFI $MODEL" qemu-system-x86_64 -bios "$OVMF" -drive file=esp.img,format=raw,if=ide
+done
+unset MODEL
 
 kill $server 2>/dev/null || true
 if [ $fail = 0 ]; then echo "NET TEST: success"; else echo "NET TEST: failure"; exit 1; fi

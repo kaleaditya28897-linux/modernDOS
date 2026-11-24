@@ -1,6 +1,6 @@
 /* BOOTX64.EFI - hardware report
  *
- * Before the monitor starts, the loader writes \MODERNDOS\HWINFO.TXT to
+ * Before the monitor starts, the loader writes \MDOS\HWINFO.TXT to
  * the boot volume (if it is writable): the firmware, the model (SMBIOS),
  * the CPU, graphics (GOP and UGA), every PCI device with its BARs, the
  * EFI configuration tables and the memory map. It is how drivers for a
@@ -285,9 +285,9 @@ static int save(EFI_FILE_PROTOCOL *root)
   UINTN n = len;
   EFI_STATUS s;
 
-  if (!root->Open(root, &f, (CHAR16 *)u"\\MODERNDOS\\HWINFO.TXT", EFI_FILE_MODE_READ | EFI_FILE_MODE_WRITE, 0))
+  if (!root->Open(root, &f, (CHAR16 *)u"\\MDOS\\HWINFO.TXT", EFI_FILE_MODE_READ | EFI_FILE_MODE_WRITE, 0))
     f->Delete(f);
-  if (root->Open(root, &f, (CHAR16 *)u"\\MODERNDOS\\HWINFO.TXT",
+  if (root->Open(root, &f, (CHAR16 *)u"\\MDOS\\HWINFO.TXT",
                  EFI_FILE_MODE_READ | EFI_FILE_MODE_WRITE | EFI_FILE_MODE_CREATE, 0))
     return -1;
   s = f->Write(f, &n, rep);
@@ -295,7 +295,7 @@ static int save(EFI_FILE_PROTOCOL *root)
   return s || n != len ? -1 : 0;
 }
 
-/* write the report to \MODERNDOS\HWINFO.TXT; 0 on success. It is saved
+/* write the report to \MDOS\HWINFO.TXT; 0 on success. It is saved
    after every section, the most useful ones first: if a section hangs
    on some firmware, the rest is on the disk already. */
 int hwinfo_write(EFI_HANDLE image, EFI_SYSTEM_TABLE *st, EFI_FILE_PROTOCOL *root)

@@ -4,9 +4,9 @@
 #   UEFI from CD, UEFI from a USB stick (the ISO written with dd),
 #   BIOS from CD (El Torito floppy emulation)
 # UEFI boots also get a SATA disk, which must come up read-only (the ISO
-# has no \MODERNDOS\DISKRW).
+# has no \MDOS\DISKRW).
 # Then the stick as on a real machine: the ISO written to a larger,
-# writable stick; after the boot \MODERNDOS\HWINFO.TXT and BOOTLOG.TXT
+# writable stick; after the boot \MDOS\HWINFO.TXT and BOOTLOG.TXT
 # must be on its EFI partition (found through the GPT, as an OS would),
 # also after a second boot (the files are replaced). And a boot under
 # conditions like an older Mac: stick on EHCI, no GOP graphics, no PS/2
@@ -90,8 +90,8 @@ stick_files() {   # stick_files name image expected-in-hwinfo...
   local name=$1 img=$2 off m; shift 2
   off=$(esp_offset "$img")
   if [ -z "$off" ]; then echo "  FAIL $name: no EFI system partition in the GPT"; fail=1; return; fi
-  MTOOLS_SKIP_CHECK=1 mtype -i "$img@@$off" ::/MODERNDOS/HWINFO.TXT 2>/dev/null | tr -d '\r' > hwinfo.txt || true
-  MTOOLS_SKIP_CHECK=1 mtype -i "$img@@$off" ::/MODERNDOS/BOOTLOG.TXT 2>/dev/null | tr -d '\r' > bootlog.txt || true
+  MTOOLS_SKIP_CHECK=1 mtype -i "$img@@$off" ::/MDOS/HWINFO.TXT 2>/dev/null | tr -d '\r' > hwinfo.txt || true
+  MTOOLS_SKIP_CHECK=1 mtype -i "$img@@$off" ::/MDOS/BOOTLOG.TXT 2>/dev/null | tr -d '\r' > bootlog.txt || true
   for m in "$@" "PCI devices" "End of report"; do
     if grep -q "$m" hwinfo.txt; then echo "  ok   $name: HWINFO.TXT: $m"; else
       echo "  FAIL $name: HWINFO.TXT lacks '$m'"; fail=1; fi
@@ -100,9 +100,9 @@ stick_files() {   # stick_files name image expected-in-hwinfo...
     if grep -q "$m" bootlog.txt; then echo "  ok   $name: BOOTLOG.TXT: $m"; else
       echo "  FAIL $name: BOOTLOG.TXT lacks '$m'"; fail=1; fi
   done
-  if [ "$(MTOOLS_SKIP_CHECK=1 mdir -i "$img@@$off" ::/MODERNDOS | grep -c 'HWINFO\|BOOTLOG')" = 2 ]; then
+  if [ "$(MTOOLS_SKIP_CHECK=1 mdir -i "$img@@$off" ::/MDOS | grep -c 'HWINFO\|BOOTLOG')" = 2 ]; then
     echo "  ok   $name: one HWINFO.TXT and one BOOTLOG.TXT"; else
-    echo "  FAIL $name: directory:"; MTOOLS_SKIP_CHECK=1 mdir -i "$img@@$off" ::/MODERNDOS; fail=1; fi
+    echo "  FAIL $name: directory:"; MTOOLS_SKIP_CHECK=1 mdir -i "$img@@$off" ::/MDOS; fail=1; fi
   if command -v fsck.vfat > /dev/null; then
     dd if="$img" of=esp.part bs=512 skip=$((off / 512)) count=61440 status=none
     if fsck.vfat -n esp.part > fsck.log 2>&1; then echo "  ok   $name: the FAT file system is clean"; else

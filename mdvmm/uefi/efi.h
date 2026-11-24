@@ -58,12 +58,19 @@ typedef struct {
   void *InstallProtocolInterface, *ReinstallProtocolInterface, *UninstallProtocolInterface;
   EFI_STATUS (EFIAPI *HandleProtocol)(EFI_HANDLE Handle, EFI_GUID *Protocol, void **Interface);
   void *Reserved, *RegisterProtocolNotify, *LocateHandle, *LocateDevicePath;
-  void *InstallConfigurationTable, *LoadImage, *StartImage, *Exit, *UnloadImage;
+  void *InstallConfigurationTable;
+  EFI_STATUS (EFIAPI *LoadImage)(uint8_t BootPolicy, EFI_HANDLE Parent, void *DevicePath,
+                                 void *SourceBuffer, UINTN SourceSize, EFI_HANDLE *Image);
+  EFI_STATUS (EFIAPI *StartImage)(EFI_HANDLE Image, UINTN *ExitDataSize, CHAR16 **ExitData);
+  void *Exit, *UnloadImage;
   EFI_STATUS (EFIAPI *ExitBootServices)(EFI_HANDLE ImageHandle, UINTN MapKey);
-  void *GetNextMonotonicCount, *Stall;
+  void *GetNextMonotonicCount;
+  EFI_STATUS (EFIAPI *Stall)(UINTN Microseconds);
   EFI_STATUS (EFIAPI *SetWatchdogTimer)(UINTN Timeout, uint64_t Code, UINTN DataSize, CHAR16 *Data);
   void *ConnectController, *DisconnectController, *OpenProtocol, *CloseProtocol;
-  void *OpenProtocolInformation, *ProtocolsPerHandle, *LocateHandleBuffer;
+  void *OpenProtocolInformation, *ProtocolsPerHandle;
+  EFI_STATUS (EFIAPI *LocateHandleBuffer)(int SearchType, EFI_GUID *Protocol, void *SearchKey,
+                                          UINTN *Count, EFI_HANDLE **Buffer);
   EFI_STATUS (EFIAPI *LocateProtocol)(EFI_GUID *Protocol, void *Registration, void **Interface);
 } EFI_BOOT_SERVICES;
 
@@ -72,17 +79,43 @@ typedef struct {
   void *VendorTable;
 } EFI_CONFIGURATION_TABLE;
 
+/* keyboard */
+typedef struct { uint16_t ScanCode; CHAR16 UnicodeChar; } EFI_INPUT_KEY;
+typedef struct EFI_SIMPLE_TEXT_INPUT_PROTOCOL {
+  void *Reset;
+  EFI_STATUS (EFIAPI *ReadKeyStroke)(struct EFI_SIMPLE_TEXT_INPUT_PROTOCOL *This, EFI_INPUT_KEY *Key);
+  void *WaitForKey;
+} EFI_SIMPLE_TEXT_INPUT_PROTOCOL;
+
+/* runtime services */
+#define EFI_VARIABLE_NON_VOLATILE       1
+#define EFI_VARIABLE_BOOTSERVICE_ACCESS 2
+#define EFI_VARIABLE_RUNTIME_ACCESS     4
+typedef struct {
+  EFI_TABLE_HEADER Hdr;
+  void *GetTime, *SetTime, *GetWakeupTime, *SetWakeupTime;
+  void *SetVirtualAddressMap, *ConvertPointer;
+  void *GetVariable, *GetNextVariableName;
+  EFI_STATUS (EFIAPI *SetVariable)(CHAR16 *Name, EFI_GUID *Vendor, uint32_t Attributes,
+                                   UINTN Size, void *Data);
+  void *GetNextHighMonotonicCount;
+  void (EFIAPI *ResetSystem)(int Type, EFI_STATUS Status, UINTN Size, void *Data);
+} EFI_RUNTIME_SERVICES;
+
+/* device paths: a list of nodes, the last one of type 7Fh */
+typedef struct { uint8_t Type, SubType, Length[2]; } EFI_DEVICE_PATH;
+
 typedef struct {
   EFI_TABLE_HEADER Hdr;
   CHAR16 *FirmwareVendor;
   uint32_t FirmwareRevision;
   EFI_HANDLE ConsoleInHandle;
-  void *ConIn;
+  EFI_SIMPLE_TEXT_INPUT_PROTOCOL *ConIn;
   EFI_HANDLE ConsoleOutHandle;
   EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL *ConOut;
   EFI_HANDLE StandardErrorHandle;
   void *StdErr;
-  void *RuntimeServices;
+  EFI_RUNTIME_SERVICES *RuntimeServices;
   EFI_BOOT_SERVICES *BootServices;
   UINTN NumberOfTableEntries;
   EFI_CONFIGURATION_TABLE *ConfigurationTable;

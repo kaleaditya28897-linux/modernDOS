@@ -44,9 +44,9 @@ mcopy -i boot.img autoexec.bat ::AUTOEXEC.BAT
 mcopy -i boot.img poweroff.com ::POWEROFF.COM
 dd if=/dev/zero of=esp.img bs=1M count=16 status=none
 mformat -i esp.img -h 64 -s 32 -t 16 ::
-mmd -i esp.img ::/EFI ::/EFI/BOOT ::/MODERNDOS
+mmd -i esp.img ::/EFI ::/EFI/BOOT ::/MDOS
 mcopy -i esp.img "$ROOT/mdvmm/build/BOOTX64.EFI" ::/EFI/BOOT/BOOTX64.EFI
-mcopy -i esp.img boot.img ::/MODERNDOS/BOOT.IMG
+mcopy -i esp.img boot.img ::/MDOS/BOOT.IMG
 
 fail=0
 run() {   # run name "log markers|..." -- qemu args

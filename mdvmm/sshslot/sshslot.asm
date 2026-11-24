@@ -50,6 +50,21 @@ start:
         jc      err_fork
         test    ax, ax
         jz      slot
+        ; wait until the new session asks for work: from then on a job
+        ; can be started in it (at most about 3 seconds)
+        mov     bl, al
+        mov     cx, 60
+.ready: push    bx
+        push    cx
+        mov     ax, (MPX << 8) | 0dh
+        int     2fh
+        pop     cx
+        pop     bx
+        jnc     .is_ready
+        sti
+        hlt
+        loop    .ready
+.is_ready:
         inc     byte [started]
         mov     al, [started]
         cmp     al, [count]
