@@ -76,6 +76,9 @@ REM packet driver (this order: the sessions must not carry a copy of it)
 A:\\SSHSLOT.COM 2 >NUL
 A:\\PKTDRV.COM >NUL
 REM installed on a disk: C:\\MDOS keeps the SSH keys and settings
+REM (not on a start from a stick: the machine's disks are read-only then)
+A:\\MDSYS.COM DISK
+IF ERRORLEVEL 1 GOTO NODISK
 IF NOT EXIST C:\\MDOS\\BOOT.IMG GOTO NODISK
 IF EXIST C:\\MDOS\\SSH\\HOSTKEY.ED GOTO HAVESSH
 MD C:\\MDOS\\SSH
@@ -91,6 +94,9 @@ IF EXIST C:\\MDOS\\SSH\\AUTHKEYS.TXT CALL A:\\NET.BAT
 GOTO END
 :NODISK
 IF EXIST A:\\AUTONET CALL A:\\NET.BAT
+IF EXIST A:\\AUTONET GOTO END
+REM a personal stick: its keys are on A:
+IF EXIST A:\\AUTHKEYS.TXT CALL A:\\NET.BAT
 :END
 EOF
 cat > tryboot.bat <<EOF

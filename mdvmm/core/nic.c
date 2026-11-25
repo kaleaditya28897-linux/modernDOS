@@ -70,7 +70,8 @@ void nic_api(struct frame *f)
   if (AL(f) == 0x15)
   {
     AX(f) = (uint16_t)((boot.boot_type == BOOT_UEFI) | (boot.flags & BOOTF_TRIAL ? 2 : 0) |
-                       (trial_confirmed ? 4 : 0));
+                       (trial_confirmed ? 4 : 0) |
+                       (boot.boot_type != BOOT_UEFI || (boot.flags & BOOTF_DISK_WRITE) ? 8 : 0));
     set_cf(f, 0);
     return;
   }

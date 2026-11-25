@@ -55,7 +55,7 @@ check() { local what=$1; shift; if "$@" > out.txt 2>&1; then ok "$what"; else ba
 DISK="-device ahci,id=ahci -drive id=hd,file=disk.img,format=raw,if=none -device ide-hd,drive=hd,bus=ahci.0,bootindex=1"
 
 echo "== 1. install from the stick"
-qemu-system-x86_64 -m 256 -bios "$OVMF" -display none -net none $DISK \
+qemu-system-x86_64 -m 256 -bios "$OVMF" -display none -nic user,model=e1000 $DISK \
   -drive if=none,id=stick,format=raw,file=stick.img -device qemu-xhci -device usb-storage,drive=stick,bootindex=0 \
   -serial file:serial.log -debugcon file:debug.log -monitor unix:mon.sock,server,nowait </dev/null &
 QPID=$!
@@ -71,7 +71,16 @@ time.sleep(1)
 s = socket.socket(socket.AF_UNIX); s.connect("mon.sock"); s.sendall(b"sendkey y\n"); time.sleep(0.5); s.close()
 while time.time() < end and b"Starting from the stick" not in text() and b"Install: FAILED" not in text():
     time.sleep(0.5)
+# the start from the stick goes on after the install: the disk has the
+# system now but is read-only; the stick's SSH server must come up
+end = time.time() + 120
+def dbg():
+    try: return open("debug.log", "rb").read()
+    except OSError: return b""
+while time.time() < end and b"sshd: listening" not in dbg():
+    time.sleep(0.5)
 PY
+check "after the install the stick starts on (read-only disk), SSHD listening" grep -aq "sshd: listening" debug.log
 kill $QPID 2>/dev/null || true; wait $QPID 2>/dev/null || true
 sed 's/\r//g; s/\x1b\[[0-9;=?]*[A-Za-z]//g' serial.log | grep -a "INSTALL\|copied\|FAILED\|Installed\|Install:" | sed 's/^/   /'
 check "the loader reports: Installed" grep -aq "^Installed" serial.log
