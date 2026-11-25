@@ -2,7 +2,7 @@
 # Release ISO boot test (runs inside the build container).
 # Boots the ISO three ways and waits for the monitor to be up:
 #   UEFI from CD, UEFI from a USB stick (the ISO written with dd),
-#   BIOS from CD (El Torito floppy emulation)
+#   BIOS from CD (El Torito hard disk emulation of the BIOS disk image)
 # UEFI boots also get a SATA disk, which must come up read-only (the ISO
 # has no \MDOS\DISKRW).
 # Then the stick as on a real machine: the ISO written to a larger,

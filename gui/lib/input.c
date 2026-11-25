@@ -145,6 +145,18 @@ static void poll_mouse(void)
     r.x.bx = (unsigned short)b;
     int33(&r);
     releases = r.x.bx;
+    if (!releases && presses)
+    {
+      /* pressed and no release counted: is it still down? Asked now, not
+         taken from the state read before - the press may have come in
+         between, and a release made up from the old state ended a drag
+         as it began */
+      __dpmi_regs q;
+      memset(&q, 0, sizeof(q));
+      q.x.ax = 0x0003;
+      int33(&q);
+      buttons = q.x.bx & 7;
+    }
     if (releases || (presses && !(buttons & bits[b])))
     {
       e.type = EV_MOUSE_UP;

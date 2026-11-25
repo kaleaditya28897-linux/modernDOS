@@ -2,17 +2,18 @@
 # Build the modernDOS release ISO (runs inside the build container, after
 # scripts/mdbuild.sh). Output: _output/release/modernDOS-$VERSION.iso
 #
-# The ISO boots three ways:
+# The ISO boots three ways (UEFI from CD and from a stick, BIOS from CD):
 #   - UEFI, from CD or USB stick (dd): an El Torito EFI image that is also
 #     an appended GPT partition (EFI system partition) holding
 #     \EFI\BOOT\BOOTX64.EFI and \MDOS\BOOT.IMG
-#   - BIOS, from CD: El Torito floppy emulation of BOOT.IMG
+#   - BIOS, from CD: El Torito hard disk emulation of the BIOS disk image
+#     (the BIOS edition, read-only there; INSTALL puts it on the hard disk)
 # BOOT.IMG is a DOS disk image: kernel, FreeCOM, HIMEMX, MDDESK, CTMOUSE (BIOS
 # boots; on UEFI boots MDVMM installs the virtual BIOS mouse driver), MDVMM,
 # demo, and the network programs: PKTDRV (packet driver on MDVMM's network
-# card drivers), SSHSLOT, SSHD, MDLOG, MDSYS, NET.BAT. The one a BIOS starts
-# from CD is a 2.88 MB floppy; the one for UEFI boots (on the EFI system
-# partition) has 8 MB and also holds the SSH client and the package manager.
+# card drivers), SSHSLOT, SSHD, SSH, PKG, MDLOG, MDSYS, NET.BAT: 8 MB, the
+# UEFI edition's boot disk. The BIOS edition is a hard disk image of its
+# own (below), also released as modernDOS-$VERSION-bios.img.
 #
 # A personal image for one's own machine: PERSONAL=<dir> adds the files of
 # that directory to BOOT.IMG, typically AUTHKEYS.TXT (public keys allowed
@@ -162,21 +163,17 @@ BASE="COMMAND.COM=/opt/fdos/bin/command.com HIMEMX.EXE=/opt/fdos/bin/himemx.exe
   MDLOG.COM=$ROOT/mdvmm/build/MDLOG.COM MDSYS.COM=$ROOT/mdvmm/build/MDSYS.COM
   SSHD.EXE=$ROOT/net/ssh/build/sshd.exe NET.BAT=net.bat TRYBOOT.BAT=tryboot.bat KEEP.BAT=keep.bat
   WATTCP.CFG=wattcp.cfg"
-# more for UEFI boots, where the disk image can be any size
+# and the programs that did not fit the 2.88 MB floppy image of old
 MORE="SSH.EXE=$ROOT/net/ssh/build/ssh.exe PKG.EXE=$ROOT/net/pkg/build/pkg.exe"
 
-# boot.img: 2.88 MB, what a BIOS can start from CD (El Torito floppy
-# emulation); uefi.img: 8 MB (130 cylinders, 2 heads, 63 sectors)
-make_image boot.img 5760 2 9 36
-put boot.img $BASE
+# uefi.img, the UEFI edition's boot disk (a RAM disk A: there): 8 MB (130
+# cylinders, 2 heads, 63 sectors)
 make_image uefi.img 16380 8 6 63
 put uefi.img $BASE $MORE
 if [ -n "$PERSONAL" ]; then
   for f in "$PERSONAL"/*; do
     [ -f "$f" ] || continue
-    for img in boot.img uefi.img; do
-      mcopy -i $img "$f" "::$(basename "$f" | tr a-z A-Z)"
-    done
+    mcopy -i uefi.img "$f" "::$(basename "$f" | tr a-z A-Z)"
   done
   echo "personal image: files of $PERSONAL added - do not publish it"
 fi
@@ -203,8 +200,17 @@ ECHO   INSTALL      put modernDOS on this machine's hard disk
 ECHO.
 SET SSHDIR=C:\\MDOS\\SSH
 SET WATTCP.CFG=C:\\MDOS\\SSH
-SET TEMP=C:\\MDOS\\TEMP
 SET PKGDIR=C:\\MDOS
+REM started from a CD the disk cannot be written: nothing is kept then
+MDSYS.COM WRITE
+IF ERRORLEVEL 1 GOTO READONLY
+SET TEMP=C:\\MDOS\\TEMP
+GOTO START
+:READONLY
+ECHO   Started from a read-only disk (a CD): settings and files are not kept.
+ECHO   INSTALL puts modernDOS on the hard disk.
+ECHO.
+:START
 CTMOUSE.EXE >NUL
 MDVMM.COM
 REM the packet driver, then DOS sessions for remote shells (this order:
@@ -329,14 +335,14 @@ minfo -i efiboot.img :: | grep -i "disk type"
 
 echo "== ISO"
 mkdir -p iso/MDOS iso/EFI/BOOT
-cp boot.img iso/MDOS/BOOT.IMG
+cp bios.img iso/MDOS/BIOS.IMG
 cp "$ROOT/mdvmm/build/BOOTX64.EFI" iso/EFI/BOOT/BOOTX64.EFI
 cp readme.txt iso/README.TXT
 sed 's/$/\r/' "$ROOT/COPYING" > iso/COPYING.TXT
 mkdir -p "$OUT"
 ISO="$OUT/modernDOS-$VERSION.iso"
 xorriso -as mkisofs -o "$ISO" -V "MODERNDOS" -R -J \
-  -b MDOS/BOOT.IMG -c MDOS/BOOT.CAT \
+  -b MDOS/BIOS.IMG -hard-disk-boot -c MDOS/BOOT.CAT \
   -eltorito-alt-boot -e --interval:appended_partition_2:all:: -no-emul-boot \
   -append_partition 2 0xef efiboot.img -appended_part_as_gpt \
   iso 2>&1 | grep -v "^xorriso : UPDATE" || true

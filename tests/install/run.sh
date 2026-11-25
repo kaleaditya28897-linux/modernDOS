@@ -20,7 +20,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
 WORK=$(mktemp -d)
 ISO="$ROOT/_output/release/modernDOS-0.0.0-installtest.iso"
-trap 'kill $QPID 2>/dev/null || true; rm -rf "$WORK" "$ISO" "$ISO.sha256"' EXIT
+trap 'kill $QPID 2>/dev/null || true; rm -rf "$WORK" "${ISO%.iso}"*' EXIT
 OVMF=/usr/share/ovmf/OVMF.fd
 PORT=2222
 export MTOOLS_SKIP_CHECK=1
