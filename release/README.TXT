@@ -59,7 +59,7 @@ Network (new, little tested on real machines)
   MDLOG          the monitor's log; MDLOG /N adds the network card's state
   MDSYS          kind of boot; MDSYS REBOOT restarts the machine
   PKG            package manager (UEFI boots): PKG UPDATE, LIST, INSTALL
-In the desktop (MDDESK): Terminal (a DOS prompt in a window, UEFI boots)
+In the desktop (MDDESK): Terminal (a DOS prompt in a window)
 and Browser (http and https pages as text).
 A stick made as a personal image offers to install modernDOS on the
 machine's disk; an installed machine is updated over SSH (TRYBOOT, KEEP).

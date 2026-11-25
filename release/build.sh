@@ -71,10 +71,10 @@ SET WATTCP.CFG=A:\\
 SET TEMP=A:\\
 A:\\CTMOUSE.EXE >NUL
 A:\\MDVMM.COM
-REM DOS sessions for the desktop's terminal and for remote shells, then the
-REM packet driver (this order: the sessions must not carry a copy of it)
-A:\\SSHSLOT.COM 2 >NUL
+REM the packet driver, then DOS sessions for the desktop's terminal and for
+REM remote shells (this order: every session gets the network)
 A:\\PKTDRV.COM >NUL
+A:\\SSHSLOT.COM 2 >NUL
 REM installed on a disk: C:\\MDOS keeps the SSH keys and settings
 REM (not on a start from a stick: the machine's disks are read-only then)
 A:\\MDSYS.COM DISK
@@ -206,10 +206,10 @@ SET TEMP=C:\\MDOS\\TEMP
 SET PKGDIR=C:\\MDOS
 CTMOUSE.EXE >NUL
 MDVMM.COM
-REM DOS sessions for remote shells, then the packet driver (this order:
-REM the sessions must not carry a copy of it)
-SSHSLOT.COM 2 >NUL
+REM the packet driver, then DOS sessions for remote shells (this order:
+REM every session gets the network)
 PKTDRV.COM >NUL
+SSHSLOT.COM 2 >NUL
 IF EXIST C:\\MDOS\\SSH\\AUTHKEYS.TXT CALL C:\\MDOS\\NET.BAT
 EOF
 sed -i 's/$/\r/' hd/autoexec.bat

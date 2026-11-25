@@ -52,4 +52,5 @@ BP_RM_RETURN     equ 1
 BP_RAW_TO_PM     equ 2
 BP_CALLBACK      equ 3            ; 16 real mode callbacks
 BP_INT13         equ 19           ; a V86 INT 13h call returned
-BP_COUNT         equ 20
+BP_KBD           equ 20           ; a session's keyboard interrupt handler returned
+BP_COUNT         equ 21

@@ -125,8 +125,8 @@ events where no window is.
 - Run: the desktop calls `gfx_suspend()` (text mode, buffers kept), runs
   the command with `system()` (COMMAND.COM), waits for a key, then
   `gfx_resume()` sets the mode again and everything is redrawn.
-- Not yet: running 32-bit DPMI programs from the desktop - the DPMI host
-  has one client at a time.
+- 32-bit DPMI programs run this way too: the program becomes a DPMI
+  client started by the desktop's (the host nests them).
 
 Two monitor fixes came with it: a DPMI client running a DOS program is no
 longer torn down when that program exits (INT 21h AH=4Ch is only the

@@ -199,6 +199,20 @@ int28:
 poll:
         cmp     byte [cs:busy], 0
         jne     .ret
+        ; no receiver here: leave the frames to the sessions that have one
+        push    bx
+        push    cx
+        mov     bx, handles
+        mov     cx, MAX_HANDLES
+.used:  cmp     byte [cs:bx], 0
+        jne     .some
+        add     bx, H_SIZE
+        loop    .used
+        pop     cx
+        pop     bx
+        ret
+.some:  pop     cx
+        pop     bx
         mov     byte [cs:busy], 1
         pushad
         push    ds

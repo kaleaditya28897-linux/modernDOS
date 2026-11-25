@@ -87,8 +87,8 @@ settings. `files.ppm`, `editor.ppm` and `settings.ppm` (with
 
 `gui/desk/term.c`. Launcher > Terminal opens a window with a DOS prompt.
 
-- The desktop is the one DPMI program; MDVMM keeps the other DOS sessions
-  running beside it. The terminal takes a *job slot*: a session started by
+- MDVMM keeps the other DOS sessions running beside the desktop. The
+  terminal takes a *job slot*: a session started by
   `SSHSLOT.COM` before the desktop (AUTOEXEC.BAT does), which waits for
   work. The same slots serve remote shells of the SSH server.
 - The window shows the session's 80x25 text screen (monitor call INT 2Fh
@@ -96,11 +96,12 @@ settings. `files.ppm`, `editor.ppm` and `settings.ppm` (with
   with the cursor; keys go into the session's BIOS keyboard buffer
   (AX=DE09h). `EXIT` closes the window; closing the window sends Ctrl+C
   and `EXIT` to the shell.
-- UEFI boots only: there MDVMM's BIOS writes a background session's text
-  to that session's screen memory. On a DOS boot the machine's own video
-  BIOS would write to the real display, so the launcher item says so.
-- Programs in the terminal are real mode DOS programs; 32-bit DPMI
-  programs need the DPMI host, which the desktop is using.
+- On both boots: a session that is not on the display writes its text
+  into its own screen memory (on DOS boots the monitor keeps it from the
+  video hardware). A program that sets a graphics mode waits until its
+  session is on the display (Ctrl+Alt+F2..).
+- Programs in the terminal can be 32-bit DPMI programs: every session has
+  its own DPMI client.
 
 ## Browser
 

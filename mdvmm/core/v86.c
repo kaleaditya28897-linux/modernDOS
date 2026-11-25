@@ -92,6 +92,34 @@ void v86_reflect(struct frame *f, uint8_t vec)
   f->cs = ivt[1];
 }
 
+/* Reflect an interrupt so that the monitor hears of the handler's return:
+   below the handler's return frame (to breakpoint bp in the stub) lies the
+   real one, which v86_bp_return takes. Nothing but the stack keeps the
+   way back, so this nests and survives a handler that never returns. */
+void v86_reflect_bp(struct frame *f, uint8_t vec, int bp)
+{
+  v86_reflect(f, vec);
+  v86_push16(f, (uint16_t)v86_vflags(f));
+  v86_push16(f, boot.stub_seg);
+  v86_push16(f, (uint16_t)(boot.stub_bp + bp));
+}
+
+/* at that breakpoint: back to the interrupted code. hw: a hardware
+   interrupt (all flags as they were); else a software interrupt (the
+   handler's flags are its result, only the interrupt flag is restored). */
+void v86_bp_return(struct frame *f, int hw)
+{
+  uint16_t fl;
+
+  f->eip = v86_pop16(f);
+  f->cs = v86_pop16(f);
+  fl = v86_pop16(f);
+  if (hw)
+    vflags_set(f, fl, 0);
+  else
+    vm1.vif = (fl & EFL_IF) != 0;
+}
+
 static uint8_t irq_vector(int irq)
 {
   return irq < 8 ? 0x08 + irq : 0x70 + irq - 8;
@@ -120,11 +148,13 @@ void v86_deliver(struct frame *f)
 
 void v86_irq(struct frame *f, int irq)
 {
+  /* the keyboard: the monitor takes the scancode (also while it waits in
+     HLT for the VM: then the keystroke is queued) */
+  if (irq == 1 && vm_kbd(f, (f->eflags & EFL_VM) != 0))
+    return;
   vm1.pending |= 1u << irq;
   /* from the monitor itself (HLT wait): just record it */
   if (!(f->eflags & EFL_VM))
-    return;
-  if (irq == 1 && vm_kbd(f))
     return;
   if (irq == 0)
     vm_tick(f);                 /* may switch sessions */
@@ -140,9 +170,10 @@ static void halt(struct frame *f)
     return;
   }
   vm_yield(f);                  /* another session may run instead */
-  while (!(vm1.vif && vm1.pending))
+  while (!(vm1.vif && (vm1.pending || vm_key_pending())))
     __asm__ volatile("sti; hlt; cli" ::: "memory");
   v86_deliver(f);
+  vm_poll(f);                   /* a keystroke that came meanwhile */
 }
 
 /* ---------------------------------------------------------------- */
@@ -276,6 +307,12 @@ static uint32_t io_in(uint16_t port, int size)
     return b;                   /* keystroke replayed by the session code */
   v = size == 1 ? inb(port) : size == 2 ? inw(port) : inl(port);
 
+  /* a scancode the monitor has taken from the keyboard controller waits
+     for the session: the controller's status must say so (a BIOS that
+     looks there first - SeaBIOS - else drops the key, and the scancode
+     would later be read in place of a mouse byte) */
+  if (port == 0x64 && size == 1 && vm_port60_waiting())
+    v = (v | 0x01) & ~0x20u;
   if (port == 0x92)
     v |= 0x02;                  /* A20 reported (and kept) on */
   return v;
@@ -288,6 +325,8 @@ static void io_out(uint16_t port, int size, uint32_t v)
     dma_out(port, (uint8_t)v);
     return;
   }
+  if (port >= 0x3b0 && port <= 0x3df && vm_vga_blocked())
+    return;                     /* not on the display: the hardware is not its */
   switch (port)
   {
     case 0x92:
@@ -400,9 +439,32 @@ static void v86_gp(struct frame *f)
       f->eip = (uint16_t)(ip + len + 1);
       if (!intercept(f, vec))
       {
-        if (vec == 0x13)
-          vm_int13(f);
-        v86_reflect(f, vec);
+        if (vec == 0x10)
+        {
+          int v = vm_video_int(f);
+          if (v == 1)
+            return;             /* done for a session that is not on the display */
+          if (v == 2)
+          {
+            /* it needs the display: wait for it, then ask again */
+            f->eip = ip;
+            vm1.vif = 1;
+            halt(f);
+            return;
+          }
+        }
+        if (vec == 0x16 && vm_key_wait(f))
+        {
+          /* no key yet: wait here, not in the BIOS, and ask again */
+          f->eip = ip;
+          vm1.vif = 1;
+          halt(f);
+          return;
+        }
+        if (vm_bios_call(vec))
+          v86_reflect_bp(f, vec, BP_INT13);
+        else
+          v86_reflect(f, vec);
       }
       return;
     }
@@ -419,7 +481,16 @@ static void v86_gp(struct frame *f)
       if (f->cs == boot.stub_seg && ip >= boot.stub_bp && ip < boot.stub_bp + BP_COUNT)
       {
         if (ip - boot.stub_bp == BP_INT13)
-          vm_int13_done(f);
+        {
+          v86_bp_return(f, 0);
+          vm_bios_done();
+        }
+        else if (ip - boot.stub_bp == BP_KBD)
+        {
+          v86_bp_return(f, 1);
+          vm_kbd_done();
+          vm_kbd_next(f);
+        }
         else
           dpmi_v86_bp(f, ip - boot.stub_bp);
         return;

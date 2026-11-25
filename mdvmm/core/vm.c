@@ -18,7 +18,6 @@
  */
 #include "core.h"
 
-#define MAX_SESSIONS  4
 #define MAX_RANGES    8
 #define SLICE_TICKS   2                 /* ~110 ms per time slice */
 #define KQ_SIZE       32
@@ -38,9 +37,10 @@ struct session {
   uint8_t kq[KQ_SIZE];                  /* queued scancodes */
   int kq_head, kq_tail;
   int slot;                             /* a job slot (SSHSLOT.COM) */
-  int in13;                             /* inside INT 13h (flat mode) */
-  uint16_t in13_cs, in13_ip;            /* where the call returns */
-  uint32_t in13_since;
+  int inbios;                           /* inside BIOS services, how deep (flat mode) */
+  uint32_t inbios_since;
+  int kbd_busy;                         /* its keyboard interrupt handler runs */
+  uint32_t kbd_since;
   int job;                              /* JOB_* */
   uint16_t job_flags, job_code;
   char cmd[128];
@@ -80,6 +80,7 @@ static int kbd_ctrl, kbd_alt;
 static int vm_trace;                    /* log every session switch */
 static int latch_valid;                 /* port 60h replay */
 static uint8_t latch;
+static uint32_t latch_tick;             /* when it was set */
 
 
 /* ---------------------------------------------------------------- */
@@ -192,6 +193,61 @@ static uint8_t *bda(int n)
   return n == cur ? (uint8_t *)rm_ptr(0x40, 0) : (uint8_t *)ses[n].inst + 0x400;
 }
 
+/* Flat mode (the machine's own video BIOS): a session that is not on the
+   display must not reach the video hardware. Its text goes into its own
+   screen memory (map_session); its writes to the VGA ports are dropped
+   (v86.c), and a mode set does not go to the BIOS (vm_video_int). */
+static int vga_trapped;
+
+int vm_vga_blocked(void)
+{
+  return flat && cur != focus;
+}
+
+static void vga_ports(void)
+{
+  int on = vm_vga_blocked();
+  uint16_t p;
+
+  if (on == vga_trapped)
+    return;
+  vga_trapped = on;
+  for (p = 0x3b0; p <= 0x3df; p++)
+    io_trap(p, on);
+}
+
+/* INT 10h of the running session. 0: to the BIOS; 1: done here; 2: the
+   session has to wait until it is on the display. */
+int vm_video_int(struct frame *f)
+{
+  uint8_t ah = *((uint8_t *)&f->eax + 1), al = *(uint8_t *)&f->eax, mode = al & 0x7f;
+  uint8_t *b;
+  uint32_t i;
+
+  if (!vm_vga_blocked())
+    return 0;
+  if (AX(f) == 0x4f02)
+    return 2;                           /* a VESA mode */
+  if (ah != 0x00)
+    return 0;
+  if (mode > 3 && mode != 7)
+    return 2;                           /* a graphics mode */
+  /* a text mode: what the BIOS would leave, in the session's own screen */
+  b = rm_ptr(0x40, 0);
+  b[0x49] = mode;
+  *(uint16_t *)(b + 0x4a) = mode < 2 ? 40 : 80;
+  *(uint16_t *)(b + 0x4c) = mode < 2 ? 2048 : 4096;
+  *(uint16_t *)(b + 0x4e) = 0;
+  memset(b + 0x50, 0, 16);              /* cursor positions */
+  *(uint16_t *)(b + 0x60) = 0x0607;     /* cursor shape */
+  b[0x62] = 0;
+  b[0x84] = 24;
+  if (!(al & 0x80))
+    for (i = 0; i < VRAM_PAGES * 4096u; i += 2)
+      *(uint16_t *)(VRAM + i) = 0x0720;
+  return 1;
+}
+
 static void map_session(int n)
 {
   struct session *s = &ses[n];
@@ -201,6 +257,7 @@ static void map_session(int n)
     map_page(p << 12, s->pages[p] ? s->pages[p] : p << 12, 7);
   for (p = 0; p < VRAM_PAGES; p++)
     map_page(VRAM + p * 4096, n == focus ? vram_phys[p] : s->vram[p], 7);
+  vga_ports();
 }
 
 /* in-service IRQs at the PICs */
@@ -216,9 +273,25 @@ static uint16_t pic_isr(void)
   return isr;
 }
 
+/* Is a scancode waiting to be read at port 60h? If the keyboard
+   interrupt handler it was given to has not read it after two timer
+   ticks it never will: it must not turn up later in place of another
+   byte (a mouse byte). */
+static int latch_ok(void)
+{
+  if (latch_valid && ticks - latch_tick > 2)
+    latch_valid = 0;
+  return latch_valid;
+}
+
 int vm_current(void)
 {
   return cur;
+}
+
+uint32_t vm_ticks(void)
+{
+  return ticks;
 }
 
 /* does the running session own the display? */
@@ -243,36 +316,54 @@ static int switchable(const struct frame *f, uint16_t isr_ignore)
 
   /* inside the BIOS disk service (unless that call is 20 seconds old:
      then the program has left it some other way) */
-  if (ses[cur].in13 && ticks - ses[cur].in13_since < 20 * 18)
+  if (ses[cur].inbios && ticks - ses[cur].inbios_since < 20 * 18)
+    return 0;
+  /* nor inside its keyboard interrupt handler: as with a real interrupt
+     in service (below). A BIOS may run its interrupt handlers on one stack
+     of its own (SeaBIOS), which two sessions must not be on at once. */
+  if (ses[cur].kbd_busy && ticks - ses[cur].kbd_since <= 9)
     return 0;
   return ifl && !vm_hold && !crit && !(pic_isr() & ~isr_ignore);
 }
 
-/* A V86 program calls INT 13h (f: the return address, before the call
-   is reflected). Flat mode: the call returns to a breakpoint instead, so
-   the monitor knows when the BIOS is done. */
-void vm_int13(struct frame *f)
+/* The running session calls a BIOS service (a software interrupt 10h to
+   1Ah). Flat mode - the machine's own BIOS: 1, and no session switch
+   until the call has returned (the caller sees to it that the monitor
+   hears of that: vm_bios_done). Two reasons: a disk transfer may be under
+   way to physical memory, and a BIOS is written for one thread of
+   execution - SeaBIOS runs its services on one stack of its own, and a
+   second session coming in there while the first is inside takes that
+   stack from under it. */
+int vm_bios_call(uint8_t vec)
 {
   struct session *s = &ses[cur];
 
-  if (!flat || (s->in13 && ticks - s->in13_since < 20 * 18))
-    return;
-  s->in13 = 1;
-  s->in13_cs = (uint16_t)f->cs;
-  s->in13_ip = (uint16_t)f->eip;
-  s->in13_since = ticks;
-  f->cs = boot.stub_seg;
-  f->eip = boot.stub_bp + BP_INT13;
+  if (!flat || vec < 0x10 || vec > 0x1a || vec == 0x18 || vec == 0x19)
+    return 0;
+  if (s->inbios && ticks - s->inbios_since >= 20 * 18)
+    s->inbios = 0;                      /* old calls that were abandoned */
+  if (!s->inbios++)
+    s->inbios_since = ticks;
+  return 1;
 }
 
-/* the breakpoint: back to the caller */
-void vm_int13_done(struct frame *f)
+void vm_bios_done(void)
 {
-  struct session *s = &ses[cur];
+  if (ses[cur].inbios)
+    ses[cur].inbios--;
+}
 
-  f->cs = s->in13_cs;
-  f->eip = s->in13_ip;
-  s->in13 = 0;
+/* Would INT 16h AH=00h/10h (read a key) wait inside the BIOS? Then the
+   monitor waits in its place (v86.c), so the session can be switched:
+   in flat mode, with the vector still the BIOS's own and no key there. */
+int vm_key_wait(const struct frame *f)
+{
+  const uint8_t *b = rm_ptr(0x40, 0);
+  uint8_t ah = *((const uint8_t *)&f->eax + 1);
+
+  return flat && nsessions > 1 && (ah == 0x00 || ah == 0x10) &&
+         *(const uint16_t *)(uint32_t)(0x16 * 4 + 2) >= 0xa000 &&
+         *(const uint16_t *)(b + 0x1a) == *(const uint16_t *)(b + 0x1c);
 }
 
 static int next_session(void)
@@ -288,26 +379,48 @@ static int next_session(void)
   return cur;
 }
 
-/* replay a queued keystroke into the running session (virtual IRQ1);
-   in protected mode (a DPMI client) through the client's IRQ1 path */
+/* Give the running session its next queued keystroke: a keyboard
+   interrupt of its own (in protected mode - a DPMI client - through the
+   client's IRQ1 path), with the scancode at port 60h. One at a time, as
+   with the interrupt controller: not before the handler of the one before
+   has returned (kbd_busy; a handler that never returns loses that claim
+   after half a second). */
 static void kbd_inject(struct frame *f)
 {
   struct session *s = &ses[cur];
   int pm = !(f->eflags & EFL_VM);
 
-  if (vm_hold || s->kq_head == s->kq_tail || latch_valid || pic_isr())
+  if (s->kbd_busy && ticks - s->kbd_since > 9)
+    s->kbd_busy = 0;
+  if (vm_hold || s->kq_head == s->kq_tail || s->kbd_busy || latch_ok() || pic_isr())
     return;
   if (pm ? !(f->eflags & EFL_IF) : !vm1.vif)
     return;
   latch = s->kq[s->kq_head];
   s->kq_head = (s->kq_head + 1) % KQ_SIZE;
   latch_valid = 1;
+  latch_tick = ticks;
+  s->kbd_busy = 1;
+  s->kbd_since = ticks;
   if (pm)
     dpmi_irq(f, 1);                     /* does not return */
-  v86_reflect(f, 0x09);
+  if (dpmi_irq_v86(f, 1))               /* a client's own handler */
+    return;
+  v86_reflect_bp(f, 0x09, BP_KBD);     /* the monitor hears of its return */
+}
+
+void vm_kbd_done(void)
+{
+  ses[cur].kbd_busy = 0;
+}
+
+void vm_kbd_next(struct frame *f)
+{
+  kbd_inject(f);
 }
 
 static struct frame next_frame;
+
 
 static void __attribute__((noreturn)) switch_to(struct frame *f, int n, int save)
 {
@@ -333,6 +446,7 @@ static void __attribute__((noreturn)) switch_to(struct frame *f, int n, int save
     for (p = first_private; p < end_private; p++)
       memcpy((void *)(p << 12), kmap(2, b->pages[p]), 4096);
   }
+  dpmi_session_switch(save ? cur : -1, n);
   cur = n;
   map_session(n);
   inst_copy(b, 0);
@@ -434,18 +548,25 @@ static void set_focus(int n)
   kprintf("vm: focus session %d\n", n);
 }
 
-/* IRQ1: hotkeys and keystrokes for a focused session that is not running.
-   Returns 1 if the interrupt was consumed. */
-int vm_kbd(struct frame *f)
+/* IRQ1: the monitor takes the scancode from the keyboard controller
+   (hotkeys are its own) and gives it to the session on the display as a
+   keyboard interrupt of its own, with the scancode at port 60h and the
+   controller's status saying so (kbd_inject, v86.c io_in) - the same way
+   for the running session and for another one, and as for USB keyboards.
+   inject: f is the session's frame (else the monitor's own, waiting for
+   the session). Returns 1: the interrupt is dealt with (f may now be in
+   the session's handler). */
+int vm_kbd(struct frame *f, int inject)
 {
+  struct session *s;
   uint8_t sc;
+  int next;
 
-  (void)f;
   if (!registered)
     return 0;
   sc = inb(0x60);
-  latch = sc;
-  latch_valid = 1;                      /* the session reads the same byte */
+  outb(0x20, 0x61);                     /* EOI IRQ1 ourselves */
+  vm1.pending &= ~2u;
   switch (sc & 0x7f)
   {
     case 0x1d: kbd_ctrl = !(sc & 0x80); break;
@@ -453,28 +574,21 @@ int vm_kbd(struct frame *f)
   }
   if (kbd_ctrl && kbd_alt && sc >= 0x3b && sc <= 0x3e)    /* F1..F4 */
   {
-    latch_valid = 0;
-    outb(0x20, 0x61);                   /* EOI IRQ1 ourselves */
-    vm1.pending &= ~2u;
     set_focus(sc - 0x3b);
     return 1;
   }
-  if (focus != cur && nsessions > 1)
+  s = &ses[focus];
+  next = (s->kq_tail + 1) % KQ_SIZE;
+  if (next != s->kq_head)
   {
-    struct session *s = &ses[focus];
-    int next = (s->kq_tail + 1) % KQ_SIZE;
-    if (next != s->kq_head)
-    {
-      s->kq[s->kq_tail] = sc;
-      s->kq_tail = next;
-    }
-    latch_valid = 0;
-    outb(0x20, 0x61);
-    vm1.pending &= ~2u;
-    want = focus;
-    return 1;
+    s->kq[s->kq_tail] = sc;
+    s->kq_tail = next;
   }
-  return 0;
+  if (focus != cur && nsessions > 1)
+    want = focus;
+  else if (inject)
+    kbd_inject(f);                      /* now if it can; else at the next chance */
+  return 1;
 }
 
 /* a keystroke from a keyboard other than the PS/2 controller (USB):
@@ -510,10 +624,15 @@ int vm_key_pending(void)
   return ses[cur].kq_head != ses[cur].kq_tail;
 }
 
+int vm_port60_waiting(void)
+{
+  return latch_ok();
+}
+
 /* port 60h read by a session: replay the latched scancode once */
 int vm_port60(uint8_t *v)
 {
-  if (!latch_valid)
+  if (!latch_ok())
     return 0;
   *v = latch;
   latch_valid = 0;

@@ -58,4 +58,11 @@ RUN bash /tmp/ipxe.sh && rm /tmp/ipxe.sh
 COPY bearssl.sh /tmp/
 RUN bash /tmp/bearssl.sh && rm /tmp/bearssl.sh
 
+# FreeDOS 1.4 FDISK, FORMAT, XCOPY -> /opt/fdos: for the BIOS edition's
+# INSTALL (the disk tools on its boot disk)
+RUN cd /opt/fdos \
+ && for p in fdisk format xcopy; do \
+      curl -fsSL -o $p.zip https://www.ibiblio.org/pub/micro/pc-stuff/freedos/files/repositories/1.4/base/$p.zip \
+      && unzip -q -o -LL $p.zip && rm $p.zip; done
+
 WORKDIR /src

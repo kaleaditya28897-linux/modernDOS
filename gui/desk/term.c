@@ -9,11 +9,13 @@
  * INT 2Fh AX=DE08h..DE0Dh). EXIT in the shell closes the window; closing
  * the window sends Ctrl+C and EXIT.
  *
- * UEFI boots only: there MDVMM's own BIOS draws a background session's
- * text into that session's screen memory. On a DOS boot the machine's
- * video BIOS would write to the real display.
- * Programs in the terminal are real mode DOS programs (the desktop is the
- * one DPMI client).
+ * A session that is not on the display has its own text screen memory
+ * (the monitor maps it at B8000h), which is what the window shows. Works
+ * for programs that write text through DOS, the BIOS or into that memory;
+ * a program that sets a graphics mode needs the real display (Ctrl+Alt+Fn
+ * switches to its session).
+ * Programs in the terminal may be DPMI programs too (each session has its
+ * own DPMI client).
  */
 #include <stdio.h>
 #include <string.h>
@@ -56,14 +58,6 @@ static int api(__dpmi_regs *r, int al)
   r->h.al = (unsigned char)al;
   __dpmi_int(0x2f, r);
   return !(r->x.flags & 1);
-}
-
-static int uefi_boot(void)
-{
-  __dpmi_regs r;
-
-  memset(&r, 0, sizeof(r));
-  return api(&r, 0x15) && (r.x.ax & 1);
 }
 
 static int job_start(void)
@@ -280,11 +274,6 @@ void term_open(void)
   for (i = 0; i < MAX_TERMS; i++)
     if (!terms[i].win && !t)
       t = &terms[i];
-  if (!uefi_boot())
-  {
-    message("The terminal needs a UEFI boot of modernDOS.");
-    return;
-  }
   if (!t || (slot = job_start()) < 0)
   {
     message("No free DOS session (start SSHSLOT before the desktop).");

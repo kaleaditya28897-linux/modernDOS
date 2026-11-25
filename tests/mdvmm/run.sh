@@ -76,6 +76,7 @@ A:\WMTEST.EXE
 IF ERRORLEVEL 1 GOTO END
 A:\UITEST.EXE
 IF ERRORLEVEL 1 GOTO END
+A:\SSHSLOT.COM 2
 A:\MDDESK.EXE /TEST
 IF ERRORLEVEL 1 GOTO END
 A:\MDDESK.EXE /TEST /EXIT
@@ -116,6 +117,7 @@ mcopy -i disk.img mousetest.exe ::MOUSETEST.EXE
 mcopy -i disk.img wmtest.exe ::WMTEST.EXE
 mcopy -i disk.img uitest.exe ::UITEST.EXE
 mcopy -i disk.img "$ROOT/gui/build/MDDESK.EXE" ::MDDESK.EXE
+mcopy -i disk.img "$ROOT/mdvmm/build/SSHSLOT.COM" ::SSHSLOT.COM
 mcopy -i disk.img /opt/fdos/bin/ctmouse.exe ::CTMOUSE.EXE
 mcopy -i disk.img bg.bat ::BG.BAT
 printf 'hello from linux\n' > linux.txt
@@ -189,7 +191,7 @@ python3 "$ROOT/tests/gui/gfxcheck.py" gfx.ppm debug.log || fail=1
 python3 "$ROOT/tests/gui/mousecheck.py" debug.log mouse.ppm loose || fail=1   # CTMOUSE accelerates
 python3 "$ROOT/tests/gui/wmcheck.py" debug.log wm.ppm || fail=1
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT/tests/gui/uicheck.py" debug.log ui.ppm || fail=1
-PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT/tests/gui/deskcheck.py" debug.log desk.ppm || fail=1
+TERMINAL=1 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT/tests/gui/deskcheck.py" debug.log desk.ppm || fail=1
 [ -n "$SHOTS" ] && cp ./*.ppm "$SHOTS"/ 2>/dev/null || true    # keep the screenshots
 # the desktop's editor changed this file (DOS boot: the disk is kept)
 if [ "$(mtype -i disk.img "::Created On Linux.txt" 2>/dev/null | od -An -c | tr -d ' \n')" = \

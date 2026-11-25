@@ -68,6 +68,9 @@ if boot "IDE disk, e1000" -drive file=disk.img,format=raw,if=ide -nic $NET,model
   dosgrep "MDSYS: a DOS boot" "DOS boot" MDSYS
   dosgrep "PKG is there" "PKG" 'DIR C:\MDOS\PKG.EXE /B'
   dosgrep "the SSH client is there" "SSH" 'DIR C:\MDOS\SSH.EXE /B'
+  # a second 32-bit program (HTTPGET) beside the SSH server: each DOS
+  # session has its own DPMI client
+  dosgrep "a 32-bit program beside the SSH server: a page over http" "HTTPGET: ok" 'HTTPGET http://10.0.2.2:8379/'
   dos 'COPY C:\FDCONFIG.SYS C:\KEPT.TXT' > /dev/null || true
   dos 'MDSYS REBOOT' > /dev/null 2>&1 || true
 fi
@@ -80,6 +83,7 @@ stop
 if boot "USB stick (UHCI), rtl8139" -usb -drive if=none,id=stick,format=raw,file=disk.img \
      -device usb-storage,drive=stick,bootindex=0 -nic $NET,model=rtl8139; then
   dosgrep "C: is the stick" "HIMEMX" 'TYPE C:\KEPT.TXT'
+  dosgrep "a page over http" "HTTPGET: ok" 'HTTPGET http://10.0.2.2:8379/'
 fi
 stop
 if [ $fail = 0 ]; then echo "BIOS TEST: success"; exit 0; else echo "BIOS TEST: failure"; exit 1; fi

@@ -73,6 +73,19 @@ files over the installed ones.
 What this does not cover: a trial that hangs with interrupts off inside
 the monitor, and power loss while `KEEP` copies (the stick is the rescue).
 
+## One card, several sessions
+
+The packet driver is loaded before the DOS sessions are forked, so every
+session has it, and every program brings its own TCP/IP stack (Watt-32)
+and gets the card's one address from DHCP. The monitor sorts the frames
+(`mdvmm/core/nic.c`): TCP and UDP of a connection go to the session that
+has sent on it, TCP to a port a session has accepted on goes there,
+everything else (ARP, DHCP, ICMP, a first SYN) to every session whose
+program polls. The answers stacks give to segments that were not theirs
+(TCP resets, ICMP unreachable) are dropped on the way out. So the SSH
+server, a browser and PKG work side by side. Limit: two sessions that
+pick the same local port for the same server at the same time collide.
+
 ## Packages
 
 `PKG` (`net/pkg/`, UEFI boot disk) installs packages from a repository on

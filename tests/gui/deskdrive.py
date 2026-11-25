@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Drive MDDESK /TEST through the QEMU monitor (see gui/desk/desk.c).
+r"""Drive MDDESK /TEST through the QEMU monitor (see gui/desk/desk.c).
 
 Usage: deskdrive.py debug.log monitor.sock out.ppm
 Opens About from the launcher, opens Run, runs V86CHK (a DOS program:
@@ -36,9 +36,6 @@ def files(mouse, sock, log, shot):
     time.sleep(0.5)
     mouse.click(*point(log, "files_newfolder"))
     wait(log, "MDDESK: widget dialogfield", 5)
-    # typing at once lost the first keys in about one run of four on DOS
-    # boots ("Folder" instead of "Test Folder"); not explained yet
-    time.sleep(0.5)
     type_text(sock, "Test Folder\n")
     wait(log, "MDDESK: created", 10)
     time.sleep(0.5)
@@ -107,8 +104,8 @@ def settings(mouse, sock, log, shot):
 
 
 def terminal(mouse, sock, log, shot):
-    """The terminal: a DOS session in a window (UEFI boots with job slots;
-    elsewhere it says why not)."""
+    """The terminal: a DOS session in a window (with job slots; without it
+    says why not)."""
     mouse.click(*point(log, "launcher"))
     time.sleep(0.5)
     mouse.click(*point(log, "terminal"))
@@ -119,6 +116,15 @@ def terminal(mouse, sock, log, shot):
     time.sleep(0.5)
     type_text(sock, "ECHO Terminal 123\n")
     wait(log, "MDDESK: term line Terminal 123", 20)
+    # a 32-bit program in the terminal's session, beside the desktop (each
+    # session has its own DPMI client)
+    before = len(re.findall(r"DPMI: \d+ failures", text(log)))
+    type_text(sock, "A:\\DPMITEST\n")
+    end = time.time() + 60
+    while time.time() < end and len(re.findall(r"DPMI: \d+ failures", text(log))) == before:
+        time.sleep(0.5)
+    print("deskdrive: DPMITEST in the terminal: %s" %
+          ("done" if len(re.findall(r"DPMI: \d+ failures", text(log))) > before else "NOT done"))
     time.sleep(1)
     send(sock, "screendump %s" % shot)
     time.sleep(1)
@@ -177,6 +183,20 @@ def main():
     send(sock, "sendkey spc")                   # back to the desktop
     wait(log, "MDDESK: resumed", 10)
     time.sleep(1.5)
+    # Run... with a 32-bit program: a DPMI client started by a client
+    mouse.click(*point(log, "launcher"))
+    time.sleep(0.5)
+    mouse.click(*point(log, "run"))
+    wait(log, "MDDESK: widget runbutton", 5)
+    time.sleep(0.5)
+    mouse.click(*point(log, "runfield"))
+    time.sleep(0.5)
+    type_text(sock, "A:\\DPMITEST")
+    send(sock, "sendkey ret")
+    wait(log, "MDDESK: ran A:\\DPMITEST", 60)
+    time.sleep(1)
+    send(sock, "sendkey spc")
+    time.sleep(3)
     send(sock, "screendump %s" % out)
     time.sleep(1)
     files(mouse, sock, log, os.path.join(os.path.dirname(out), "files.ppm"))

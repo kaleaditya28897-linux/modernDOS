@@ -1,13 +1,18 @@
 /* MDVMM core - DPMI 0.9 host
  *
- * One client at a time (16 or 32 bit), running at ring 3 with IOPL 3, so
+ * A client per DOS session (16 or 32 bit), and clients it starts in turn
+ * (a program run by a DPMI program: MAX_NEST deep), at ring 3 with IOPL 3, so
  * CLI/STI/IRET act on the real interrupt flag. Transitions between the
  * client and real mode are driven by breakpoints:
  *   V86 side: HLT bytes in the loader's resident stub (BP_* in bootinfo.h)
  *   PM side:  a ring 3 host code page full of HLT (HBP_* below)
  * Nested transitions are kept on a small stack of saved frames.
- * The client belongs to the DOS session it started in (vm.c); the other
- * sessions keep running around it and never see its handlers.
+ * A client belongs to the DOS session it started in (vm.c); the other
+ * sessions keep running around it and never see its handlers. The host's
+ * state below (descriptor table, client, transitions, host stack) is that
+ * of the running session; dpmi_session_switch() swaps it. Every session's
+ * client has its own slice of the linear address space, so all clients'
+ * memory stays mapped.
  */
 #include "core.h"
 
@@ -27,6 +32,10 @@
 #define CLIENT_END    0xBF000000u
 #define PHYSMAP_BASE  0xC0000000u       /* DPMI 0800h mappings */
 #define PHYSMAP_END   0xDF000000u
+/* a session's slice of each */
+#define CLIENT_SLICE  (((CLIENT_END - CLIENT_BASE) / MAX_SESSIONS) & ~0x3fffffu)
+#define PHYSMAP_SLICE (((PHYSMAP_END - PHYSMAP_BASE) / MAX_SESSIONS) & ~0x3fffffu)
+#define HSTACK_PAGES  (HOST_STACK / 4096 - 1)
 
 #define MAX_BLOCKS    128
 #define MAX_CALLBACKS 16
@@ -67,6 +76,7 @@ struct trans {
   uint32_t a, b, c;
   uint16_t rm_ss, rm_sp;
   uint32_t hstack;
+  int bios;                             /* a BIOS service call (vm_bios_call) */
 };
 
 static struct desc ldt[LDT_ENTRIES] __attribute__((aligned(8)));
@@ -82,12 +92,93 @@ static struct client {
   struct block blocks[MAX_BLOCKS];
   struct callback cb[MAX_CALLBACKS];
   uint32_t next_lin, next_phys;
+  uint32_t lin_base, lin_end;           /* this client's linear memory */
+  uint32_t phys_base, phys_end;         /* and its 0800h mappings */
 } cl;
 
 static struct trans ts[MAX_TRANS];
 static int tsp;
 static uint16_t rm_ss_cur, rm_sp_cur;   /* real mode stack for host calls */
 static uint32_t hstack_cur = HOST_STACK;
+
+/* the state of the sessions that are not running */
+static struct saved {
+  int valid;                            /* it has a client */
+  struct desc ldt[LDT_ENTRIES];
+  uint8_t ldt_used[LDT_ENTRIES];
+  struct client cl;
+  struct trans ts[MAX_TRANS];
+  int tsp;
+  uint16_t rm_ss_cur, rm_sp_cur;
+  uint32_t hstack_cur;
+} saved[MAX_SESSIONS];
+static uint32_t hstack_pages[MAX_SESSIONS][HSTACK_PAGES];
+
+/* Clients that started another program which became a client itself: they
+   wait (inside their INT 21h EXEC) until it ends. Kept per session, in
+   pages taken when needed. */
+#define MAX_NEST 4
+static struct saved *nest[MAX_SESSIONS][MAX_NEST];
+static int nest_depth[MAX_SESSIONS];
+#define NEST_PAGES ((sizeof(struct saved) + 4095) / 4096)
+#define NEST_AREA  0xE1000000u          /* their linear addresses */
+
+static void state_save(struct saved *a)
+{
+  memcpy(a->ldt, ldt, sizeof(ldt));
+  memcpy(a->ldt_used, ldt_used, sizeof(ldt_used));
+  memcpy(&a->cl, &cl, sizeof(cl));
+  memcpy(a->ts, ts, sizeof(ts[0]) * (uint32_t)tsp);
+  a->tsp = tsp;
+  a->rm_ss_cur = rm_ss_cur;
+  a->rm_sp_cur = rm_sp_cur;
+  a->hstack_cur = hstack_cur;
+}
+
+static void state_load(const struct saved *b)
+{
+  memcpy(ldt, b->ldt, sizeof(ldt));
+  memcpy(ldt_used, b->ldt_used, sizeof(ldt_used));
+  memcpy(&cl, &b->cl, sizeof(cl));
+  memcpy(ts, b->ts, sizeof(ts[0]) * (uint32_t)b->tsp);
+  tsp = b->tsp;
+  rm_ss_cur = b->rm_ss_cur;
+  rm_sp_cur = b->rm_sp_cur;
+  hstack_cur = b->hstack_cur;
+}
+
+/* the running client steps aside for a new one in its session; 0: no room */
+static int nest_push(void)
+{
+  int ses = cl.session, d = nest_depth[ses];
+  uint32_t lin = NEST_AREA + ((uint32_t)ses * MAX_NEST + (uint32_t)d) * (NEST_PAGES + 1) * 4096, off, p;
+
+  if (d == MAX_NEST)
+    return 0;
+  if (!nest[ses][d])
+  {
+    if (pages_free() < NEST_PAGES + 8)
+      return 0;
+    for (off = 0; off < NEST_PAGES * 4096; off += 4096)
+      if (!(p = page_alloc()) || !map_page(lin + off, p, 3))
+        return 0;
+    nest[ses][d] = (struct saved *)lin;
+  }
+  state_save(nest[ses][d]);
+  nest_depth[ses] = d + 1;
+  return 1;
+}
+
+/* the running client has ended: the one that started it is the client again */
+static void nest_pop(void)
+{
+  int ses = vm_current();
+
+  if (!nest_depth[ses])
+    return;
+  state_load(nest[ses][--nest_depth[ses]]);
+  kprintf("dpmi: back in the client with PSP %04x\n", cl.psp);
+}
 
 /* ---------------------------------------------------------------- */
 /* descriptors                                                      */
@@ -271,6 +362,8 @@ static void sanitize_sregs(struct frame *f)
     f->pgs = 0;
 }
 
+static int rm_bios;                     /* the call rm_int set up is a BIOS service */
+
 static void trans_push(const struct frame *f, int kind, uint32_t a, uint32_t b, uint32_t c)
 {
   struct trans *t;
@@ -286,6 +379,8 @@ static void trans_push(const struct frame *f, int kind, uint32_t a, uint32_t b, 
   t->rm_ss = rm_ss_cur;
   t->rm_sp = rm_sp_cur;
   t->hstack = hstack_cur;
+  t->bios = rm_bios;
+  rm_bios = 0;
 }
 
 static struct trans *trans_pop(void)
@@ -353,7 +448,11 @@ static void rm_int(struct frame *v, uint8_t vec, uint32_t flags)
   v->eip = ivt[0];
   v->cs = ivt[1];
   vm1.vif = 0;
+  rm_bios = vm_bios_call(vec);          /* kept with the transition (rm_go) */
 }
+
+/* set for the transition of a hardware interrupt: IRQ + 1 (kept in its b) */
+static uint32_t mark_irq;
 
 /* run PM code `h` on the host stack, it returns with IRET to HBP_IRET */
 static void pm_handler(const struct frame *cur, struct farptr h, int kind,
@@ -364,7 +463,8 @@ static void pm_handler(const struct frame *cur, struct farptr h, int kind,
 
   if (!(cur->eflags & EFL_VM) && cur->ss == HDATA_SEL && cur->esp - 0x100 < esp)
     esp = (cur->esp - 0x100) & ~3u;
-  trans_push(cur, kind, a, 0, 0);
+  trans_push(cur, kind, a, mark_irq, 0);
+  mark_irq = 0;
   hstack_cur = esp - HOST_LEVEL;
 
   memcpy(&n, cur, sizeof(n));
@@ -398,7 +498,7 @@ static void free_blocks(void)
         page_free(p);
     b->lin = b->size = 0;
   }
-  for (lin = PHYSMAP_BASE; lin < cl.next_phys; lin += 4096)
+  for (lin = cl.phys_base; lin < cl.next_phys; lin += 4096)
     unmap_page(lin);
 }
 
@@ -426,6 +526,7 @@ static void __attribute__((noreturn)) client_exit(uint8_t code)
   cl.active = 0;
   tsp = 0;
   hstack_cur = HOST_STACK;
+  nest_pop();                           /* DOS returns into its EXEC call */
   vm1.vif = 1;
   v86_reflect(&v, 0x21);
   enter_frame(&v);
@@ -461,28 +562,48 @@ static void client_enter(struct frame *v)
   struct frame p;
   int i;
 
-  if (cl.active)                        /* one client (maybe in another session) */
+  uint32_t lin_base = CLIENT_BASE + (uint32_t)vm_current() * CLIENT_SLICE;
+  uint32_t phys_base = PHYSMAP_BASE + (uint32_t)vm_current() * PHYSMAP_SLICE;
+  uint32_t hstack = HOST_STACK;
+
+  if (cl.active)
   {
-    v->eip = ret_ip;
-    v->cs = ret_cs;
-    AX(v) = ERR_UNSUPPORTED;
-    v->eflags |= EFL_CF;
-    return;
+    /* a program the client started: the client waits in its EXEC call;
+       the new one gets the memory above it and the rest of the host stack */
+    lin_base = (cl.next_lin + 0x3fffffu) & ~0x3fffffu;
+    phys_base = cl.next_phys;
+    hstack = hstack_cur;
+    if (lin_base >= cl.lin_end || !nest_push())
+    {
+      v->eip = ret_ip;
+      v->cs = ret_cs;
+      AX(v) = ERR_UNSUPPORTED;
+      v->eflags |= EFL_CF;
+      return;
+    }
   }
   memset(&cl, 0, sizeof(cl));
+  memset(ldt, 0, sizeof(ldt));
+  memset(ldt_used, 0, sizeof(ldt_used));
   tsp = 0;
-  hstack_cur = HOST_STACK;
+  hstack_cur = hstack;
   cl.active = 1;
   cl.session = vm_current();
   cl.bits32 = AX(v) & 1;
-  cl.psp = *(uint16_t *)rm_ptr(boot.stub_seg, boot.stub_psp);
+  /* the program's PSP: DOS knows (the stub's copy is one for all sessions) */
+  cl.psp = dos_current_psp() > 0 ? (uint16_t)dos_current_psp()
+                                 : *(uint16_t *)rm_ptr(boot.stub_seg, boot.stub_psp);
   cl.rm_ss = (uint16_t)v->es;           /* private data area */
   cl.rm_sp = 0x800;
   cl.rm_ds = (uint16_t)v->ds;
   rm_ss_cur = cl.rm_ss;
   rm_sp_cur = cl.rm_sp;
-  cl.next_lin = CLIENT_BASE;
-  cl.next_phys = PHYSMAP_BASE;
+  cl.lin_base = lin_base;
+  cl.lin_end = CLIENT_BASE + (uint32_t)(cl.session + 1) * CLIENT_SLICE;
+  cl.phys_base = phys_base;
+  cl.phys_end = PHYSMAP_BASE + (uint32_t)(cl.session + 1) * PHYSMAP_SLICE;
+  cl.next_lin = cl.lin_base;
+  cl.next_phys = cl.phys_base;
 
   i = ldt_alloc(5);
   desc_init(i, (uint32_t)ret_cs << 4, 0xffff, 0xfa, 0x00);      /* CS */
@@ -509,8 +630,8 @@ static void client_enter(struct frame *v)
   p.pes = LSEL(i + 3);
   p.pfs = p.pgs = 0;
   p.eflags = pm_flags(v86_vflags(v)) & ~EFL_CF;
-  kprintf("dpmi: %u bit client, PSP %04x, session %d\n", cl.bits32 ? 32 : 16, cl.psp,
-          cl.session);
+  kprintf("dpmi: %u bit client, PSP %04x, session %d%s\n", cl.bits32 ? 32 : 16, cl.psp,
+          cl.session, nest_depth[cl.session] ? ", started by a client" : "");
   enter_frame(&p);
 }
 
@@ -565,7 +686,7 @@ static void api_alloc(struct frame *f, uint32_t size)
     return api_error(f, ERR_VALUE);
   if (!b)
     return api_error(f, ERR_HANDLE);
-  if (cl.next_lin + size > CLIENT_END)
+  if (cl.next_lin + size > cl.lin_end)
     return api_error(f, ERR_LINEAR);
   if (!map_fresh(cl.next_lin, size))
     return api_error(f, ERR_PHYSICAL);
@@ -611,7 +732,7 @@ static void api_resize(struct frame *f, uint32_t handle, uint32_t size)
   else if (b->lin + b->size + 4096 == cl.next_lin)
   {
     /* last block: grow in place */
-    if (b->lin + size > CLIENT_END)
+    if (b->lin + size > cl.lin_end)
       return api_error(f, ERR_LINEAR);
     if (!map_fresh(b->lin + b->size, size - b->size))
       return api_error(f, ERR_PHYSICAL);
@@ -622,7 +743,7 @@ static void api_resize(struct frame *f, uint32_t handle, uint32_t size)
   {
     /* move the pages to a new linear range, then add more */
     nlin = cl.next_lin;
-    if (nlin + size > CLIENT_END)
+    if (nlin + size > cl.lin_end)
       return api_error(f, ERR_LINEAR);
     if (!map_fresh(nlin + b->size, size - b->size))
       return api_error(f, ERR_PHYSICAL);
@@ -650,11 +771,11 @@ static void api_meminfo(struct frame *f)
   m[0] = freep * 4096;                  /* largest free block */
   m[1] = freep;                         /* max unlocked allocation */
   m[2] = freep;                         /* max locked allocation */
-  m[3] = (CLIENT_END - CLIENT_BASE) / 4096;
+  m[3] = (cl.lin_end - cl.lin_base) / 4096;
   m[4] = pages_total();
   m[5] = freep;
   m[6] = pages_total();
-  m[7] = (CLIENT_END - cl.next_lin) / 4096;
+  m[7] = (cl.lin_end - cl.next_lin) / 4096;
   m[8] = 0;                             /* no paging file */
   set_cf(f, 0);
 }
@@ -670,7 +791,7 @@ static void api_physmap(struct frame *f)
   else
   {
     size = ((phys & 0xfff) + size + 4095) & ~4095u;
-    if (!size || cl.next_phys + size > PHYSMAP_END)
+    if (!size || cl.next_phys + size > cl.phys_end)
       return api_error(f, ERR_LINEAR);
     for (off = 0; off < size; off += 4096)
     {
@@ -808,6 +929,8 @@ static void rm_return(struct frame *v)
   struct frame pm;
   uint32_t fl;
 
+  if (t->bios)
+    vm_bios_done();
   memcpy(&pm, &t->f, sizeof(pm));
   switch (t->kind)
   {
@@ -833,6 +956,8 @@ static void rm_return(struct frame *v)
       }
       break;
     case T_PM_IRQ:
+      if (t->b == 2)
+        vm_kbd_done();                  /* the keyboard interrupt's handler is through */
       break;
     case T_PM_CALL:
     {
@@ -861,6 +986,7 @@ static void rm_return(struct frame *v)
   vm1.vif = 1;
   sanitize_sregs(&pm);
   dpmi_take_pending(&pm);
+  vm_kbd_next(&pm);                     /* the next keystroke, if one waits */
   enter_frame(&pm);
 }
 
@@ -874,7 +1000,13 @@ static void rm_callback(struct frame *v, int i)
   struct frame n;
 
   if (!c->used)
-    panic("dpmi: call to free real mode callback %d", i);
+  {
+    /* not this client's: one that waits for it registered it (or it was
+       freed): return to the caller, a far return */
+    v->eip = v86_pop16(v);
+    v->cs = v86_pop16(v);
+    return;
+  }
   r = pm_ptr(c->regs.sel, c->regs.off);
   r->eax = v->eax;
   r->ebx = v->ebx;
@@ -994,10 +1126,52 @@ int dpmi_active(void)
   return cl.active;
 }
 
-/* the session the client runs in, -1 if there is none */
+/* the running session if it has a client, else -1 */
 int dpmi_owner(void)
 {
   return cl.active ? cl.session : -1;
+}
+
+/* The session scheduler goes from session `from` to session `to`: put the
+   host's state away and take the other session's. from < 0: that session
+   is gone (its client's memory is released). */
+void dpmi_session_switch(int from, int to)
+{
+  struct saved *a, *b = &saved[to];
+  int i;
+
+  if (from < 0)
+  {
+    while (cl.active)                   /* with the clients that wait for it */
+    {
+      kprintf("dpmi: the client's session ended\n");
+      free_blocks();
+      cl.active = 0;
+      nest_pop();
+    }
+  }
+  else
+  {
+    a = &saved[from];
+    a->valid = cl.active;
+    if (cl.active)
+      state_save(a);
+  }
+  if (b->valid)
+  {
+    state_load(b);
+    b->valid = 0;
+  }
+  else
+  {
+    memset(ldt, 0, sizeof(ldt));
+    memset(ldt_used, 0, sizeof(ldt_used));
+    cl.active = 0;
+    tsp = 0;
+    hstack_cur = HOST_STACK;
+  }
+  for (i = 0; i < (int)HSTACK_PAGES; i++)
+    map_page(HOST_AREA + 4096u * (uint32_t)(i + 1), hstack_pages[to][i], 7);
 }
 
 /* real mode INT 21h AH=4Ch while a client is active (e.g. via 0300h) */
@@ -1017,6 +1191,7 @@ void dpmi_rm_exit(void)
   cl.active = 0;
   tsp = 0;
   hstack_cur = HOST_STACK;
+  nest_pop();
 }
 
 /* IRQs the CPU accepted while the monitor waited (or V86 had IF off) are
@@ -1044,6 +1219,7 @@ int dpmi_irq_v86(struct frame *v, int irq)
     return 0;
   rm_ss_cur = (uint16_t)v->ss;
   rm_sp_cur = (uint16_t)(v->esp - 0x40);
+  mark_irq = (uint32_t)irq + 1;
   pm_handler(v, cl.pmint[vec], T_TO_PM_HANDLER, 0, v86_vflags(v));
   return 1;
 }
@@ -1058,7 +1234,7 @@ void dpmi_hwirq(struct frame *f, int irq)
     vm_tick(f);                         /* does not return if it switched */
     vm1.pending &= ~1u;
   }
-  else if (irq == 1 && vm_kbd(f))
+  else if (irq == 1 && vm_kbd(f, 1))
     enter_frame(f);                     /* a hotkey or another session's key */
   dpmi_irq(f, irq);
 }
@@ -1069,11 +1245,13 @@ void dpmi_irq(struct frame *f, int irq)
   uint8_t vec = irq < 8 ? 0x08 + irq : 0x70 + irq - 8;
   struct frame v;
 
+  mark_irq = (uint32_t)irq + 1;
   if (cl.pmint[vec].sel)
     pm_handler(f, cl.pmint[vec], T_TO_PM_HANDLER, 0, f->eflags);
+  mark_irq = 0;
   rm_setup(&v, f);
   rm_int(&v, vec, f->eflags);
-  rm_go(&v, f, T_PM_IRQ, 0, 0, 0);
+  rm_go(&v, f, T_PM_IRQ, 0, (uint32_t)irq + 1, 0);
 }
 
 static void pm_int(struct frame *f, uint8_t vec);
@@ -1092,6 +1270,11 @@ static void host_bp(struct frame *f, uint32_t off)
       panic("dpmi: bad handler return (kind %d)", t->kind);
     if (!(t->f.eflags & EFL_VM))
       sanitize_sregs(&t->f);
+    if (t->b == 2)
+    {
+      vm_kbd_done();
+      vm_kbd_next(&t->f);
+    }
     enter_frame(&t->f);
   }
   if (off == HBP_EXC_RET)
@@ -1507,12 +1690,13 @@ void dpmi_init(void)
     panic("dpmi: no memory");
   memset(code, 0xf4, 4096);             /* HLT everywhere ... */
   code[HBP_RETF] = 0xcb;                /* ... except the no-op RETF */
-  for (off = 4096; off < HOST_STACK; off += 4096)
-  {
-    p = page_alloc();
-    if (!p || !map_page(HOST_AREA + off, p, 7))
+  /* a host stack per session; session 0's is mapped now */
+  for (off = 0; off < MAX_SESSIONS * HSTACK_PAGES; off++)
+    if (!(hstack_pages[off / HSTACK_PAGES][off % HSTACK_PAGES] = page_alloc()))
       panic("dpmi: no memory");
-  }
+  for (off = 0; off < HSTACK_PAGES; off++)
+    if (!map_page(HOST_AREA + 4096 * (off + 1), hstack_pages[0][off], 7))
+      panic("dpmi: no memory");
   gdt_set(HCODE_SEL >> 3, HOST_AREA, 0xfff, 0xfa, 0x40);
   gdt_set(HDATA_SEL >> 3, HOST_AREA, HOST_STACK - 1, 0xf2, 0x40);
   ldt_load(ldt, LDT_ENTRIES);

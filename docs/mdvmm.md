@@ -90,7 +90,12 @@ The monitor logs to I/O port E9h (QEMU `-debugcon`, Bochs).
 
 ## DPMI host
 
-`core/dpmi.c` implements DPMI 0.9 for one client at a time (16 or 32 bit).
+`core/dpmi.c` implements DPMI 0.9 (16 or 32 bit clients). Every DOS
+session can have a client, and a client can start a program that becomes
+a client itself (four deep): the first waits in its EXEC call. The host's
+state (descriptor table, client record, transitions, host stack) is that
+of the running session and is swapped on a session switch; each session's
+clients have their own slice of the linear address space.
 Clients run at ring 3 with IOPL 3, so CLI/STI act on the real interrupt
 flag, as with CWSDPMI.
 
@@ -145,10 +150,25 @@ COMSPEC; session 0 is the original DOS.
 - Scheduling: round robin, 2 timer ticks per slice; a session that idles
   (INT 28h, INT 2Fh AX=1680h, HLT) yields at once. Missed timer ticks are
   added to the BIOS tick count when a session runs again.
-- All hardware interrupts go to the running session. Keystrokes for a
-  focused session that is not running are queued and replayed.
+- Hardware interrupts go to the running session, except the keyboard:
+  the monitor takes every scancode from the controller (hotkeys are its
+  own) and gives it to the session on the display as a keyboard interrupt
+  of its own - the scancode at port 60h, the controller's status saying
+  so, one keystroke at a time (not before the handler of the one before
+  has returned).
 - Text mode video: the focused session owns B8000h, the others write to
   shadow pages.
+- DOS boots (the machine's own BIOS), "flat" sessions: memory below 640K
+  is copied on a switch, not remapped, so a linear address is the
+  physical one (BIOS disk code in system management mode and DMA
+  hardware read memory by physical address). A session inside a BIOS
+  service (INT 10h-1Ah) is not switched out - a BIOS is written for one
+  thread (SeaBIOS: one stack of its own for all services) - and a wait
+  for a key (INT 16h AH=00h/10h) is done by the monitor in the BIOS's
+  place. A session that is not on the display does not reach the video
+  hardware: writes to the VGA ports are dropped, a text mode set is done
+  in its own screen memory, a graphics mode set waits for the display.
+- One network card for all sessions: see `docs/network.md`.
 - INT 15h AH=87h block moves translate addresses below 110000h through
   the running session's page tables (XMS moves into private memory).
 
@@ -252,10 +272,11 @@ BIOS does, and loads the kernel.
   lost; hard disks are real); USB keyboards only on root ports (no
   hubs, no hotplug), no USB mice; text mode only; the framebuffer must be below 4 GB
   and 32 bpp RGB/BGR; no ISA DMA (no bounce buffer below 16 MB).
-- Sessions: no switching while a DPMI client runs; a DPMI client doing
-  its own DMA in a session other than 0 gets wrong addresses; graphics
-  modes are not virtualized (the focused session owns the screen only in
-  text mode); the BIOS is assumed to keep its state in the BIOS data area.
+- Sessions: graphics modes are not virtualized (a session that is not on
+  the display waits when it sets one; a DPMI client's mode set through
+  DPMI is not caught); DPMI clients are not protected from each other
+  (their memory is all mapped); on UEFI boots a DPMI client doing its own
+  DMA in a session other than 0 gets wrong addresses.
 
 ## Testing
 

@@ -150,10 +150,21 @@ int dpmi_take_pending(struct frame *pm);
 void dpmi_rm_exit(void);
 int dpmi_active(void);
 int dpmi_owner(void);
+void dpmi_session_switch(int from, int to);
 void dpmi_hwirq(struct frame *f, int irq);
+#define MAX_SESSIONS  4
 int vm_current(void);
-void vm_int13(struct frame *f);
-void vm_int13_done(struct frame *f);
+int vm_port60_waiting(void);
+void vm_kbd_done(void);                 /* a session's keyboard handler returned */
+void vm_kbd_next(struct frame *f);      /* give the session its next keystroke */
+uint32_t vm_ticks(void);                /* timer ticks since the start */
+int vm_vga_blocked(void);
+int vm_video_int(struct frame *f);
+int vm_bios_call(uint8_t vec);
+void vm_bios_done(void);
+int vm_key_wait(const struct frame *f);
+void v86_reflect_bp(struct frame *f, uint8_t vec, int bp);
+void v86_bp_return(struct frame *f, int hw);
 int vm_has_focus(void);
 uint8_t *vm_focus_bda(void);
 extern int vm_hold;
@@ -164,7 +175,7 @@ extern uint32_t vram_phys[VRAM_PAGES];
 void vm_tick(struct frame *f);
 void vm_poll(struct frame *f);
 void vm_yield(struct frame *f);
-int vm_kbd(struct frame *f);
+int vm_kbd(struct frame *f, int inject);
 int vm_port60(uint8_t *v);
 void vm_key(uint8_t sc);
 int dos_current_psp(void);
