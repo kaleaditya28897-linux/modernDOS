@@ -53,4 +53,9 @@ RUN bash /tmp/watt32/watt32.sh && rm -rf /tmp/watt32 /opt/watt32/bin
 COPY ipxe.sh /tmp/
 RUN bash /tmp/ipxe.sh && rm /tmp/ipxe.sh
 
+# BearSSL -> /opt/bearssl: TLS for the browser and the package manager
+# (pinned, checked; see bearssl.sh)
+COPY bearssl.sh /tmp/
+RUN bash /tmp/bearssl.sh && rm /tmp/bearssl.sh
+
 WORKDIR /src

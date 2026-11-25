@@ -114,8 +114,10 @@ Back, the page below.
   style sheets are skipped.
 - Keys in the page: Up, Down, PgUp, PgDn, Space, Home, End; Backspace
   goes back.
-- `http://` only: there is no TLS yet, so most of today's web is out of
-  reach; the start page lists a few plain http places.
+- `http://` and `https://` (TLS 1.2 with BearSSL, `net/pkg/tls.c`; server
+  certificates are checked against Mozilla's list of authorities, built
+  in). No scripts run, so pages that scripts build stay empty; the start
+  page lists places that read well as text.
 - The network is Watt-32 through the packet driver (`PKTDRV`, loaded by
   AUTOEXEC.BAT before the desktop); loading a page blocks the desktop
   until it is there.

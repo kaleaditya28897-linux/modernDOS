@@ -27,10 +27,13 @@ $(B)/mdgui.o: $(OBJS)
 DESK    = desk/desk.c desk/files.c desk/editor.c desk/settings.c desk/term.c desk/browser.c
 # the browser's network side: the HTTP client on Watt-32, code page 437
 WATT    = /opt/watt32
-NET     = ../net/pkg/http.c ../net/ssh/console.c ../net/ssh/buf.c
+BEAR   ?= $(firstword $(wildcard /opt/bearssl ../_output/ext/bearssl))
+NET     = ../net/pkg/http.c ../net/pkg/tls.c ../net/ssh/console.c ../net/ssh/buf.c ../net/ssh/rng.c \
+          ../net/ssh/crypto/monocypher.c
 
 $(B)/MDDESK.EXE: $(DESK) $(NET) desk/desk.h $(B)/mdgui.o lib/mdgui.h ../net/pkg/http.h
-	$(CC) $(CFLAGS) -I$(WATT)/inc -s -o $@ $(DESK) $(NET) $(B)/mdgui.o -L$(WATT)/lib -lwatt
+	$(CC) $(CFLAGS) -I$(WATT)/inc -I$(BEAR)/inc -I$(BEAR) -s -o $@ $(DESK) $(NET) $(B)/mdgui.o \
+	  -L$(WATT)/lib -lwatt $(BEAR)/lib/libbearssl.a
 
 clean:
 	rm -rf $(B)

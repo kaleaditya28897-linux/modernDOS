@@ -60,7 +60,7 @@ Network (new, little tested on real machines)
   MDSYS          kind of boot; MDSYS REBOOT restarts the machine
   PKG            package manager (UEFI boots): PKG UPDATE, LIST, INSTALL
 In the desktop (MDDESK): Terminal (a DOS prompt in a window, UEFI boots)
-and Browser (plain http pages as text).
+and Browser (http and https pages as text).
 A stick made as a personal image offers to install modernDOS on the
 machine's disk; an installed machine is updated over SSH (TRYBOOT, KEEP).
 From another machine: ssh, sftp and scp to the address SSHD prints; DOS

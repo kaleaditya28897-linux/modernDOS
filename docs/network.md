@@ -90,7 +90,8 @@ names the repository, its public key and where packages go:
     key  = <64 hex digits>
     root = C:\
 
-There is no TLS, so trust comes from signatures: `INDEX.TXT` (name,
+A repository may be `http://` or `https://`; trust comes from signatures
+either way: `INDEX.TXT` (name,
 version, file, size, SHA-256, description per package) is signed with the
 repository's ed25519 key (`INDEX.SIG`); PKG uses a list only if the
 signature fits the key in PKG.CFG, and a package only if its SHA-256 is

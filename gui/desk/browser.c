@@ -1,7 +1,7 @@
 /*
  * MDDESK Browser - a small web browser (M6).
  *
- * HTTP only (no TLS yet), text layout: a page becomes lines of character
+ * http and https (TLS 1.2, BearSSL), text layout: a page becomes lines of character
  * cells with a style (text, bold, heading, link, preformatted). Handles
  * headings, paragraphs, line breaks, lists, links, preformatted text,
  * rules, tables (cells in a row), image and form placeholders, character
@@ -232,7 +232,7 @@ static void resolve(const char *base, const char *href, char *out, size_t n)
   p = strstr(root, "://");
   p = p ? strchr(p + 3, '/') : 0;
   if (!strncmp(href, "//", 2))
-    snprintf(out, n, "http:%s", href);
+    snprintf(out, n, "%s:%s", strncasecmp(base, "https:", 6) ? "http" : "https", href);
   else if (*href == '/')
   {
     if (p)
@@ -669,14 +669,17 @@ static int to_mem(void *ctx, const void *data, size_t n)
 static const char start_page[] =
   "<title>modernDOS Browser</title><h1>modernDOS Browser</h1>"
   "<p>Type an address above and press Enter. This browser shows pages as text: headings, "
-  "lists, links, tables and preformatted text. It speaks <b>http://</b> only; secure "
-  "(https) sites are not reachable yet.</p>"
+  "lists, links, tables and preformatted text, from <b>http</b> and <b>https</b> sites. "
+  "It runs no scripts, so sites that are built by scripts in the page stay empty.</p>"
   "<p>In a page: click a link; <b>Up</b>, <b>Down</b>, <b>PgUp</b>, <b>PgDn</b>, <b>Home</b>, "
   "<b>End</b> scroll; <b>Backspace</b> goes back.</p>"
-  "<h2>Places that still speak plain http</h2><ul>"
-  "<li><a href=\"http://frogfind.com/\">FrogFind</a> - a search engine for old computers</li>"
-  "<li><a href=\"http://wiby.me/\">Wiby</a> - a search engine for simple pages</li>"
-  "<li><a href=\"http://neverssl.com/\">NeverSSL</a></li></ul>";
+  "<h2>Places that read well as text</h2><ul>"
+  "<li><a href=\"https://lite.duckduckgo.com/lite/\">DuckDuckGo Lite</a> - search</li>"
+  "<li><a href=\"http://frogfind.com/\">FrogFind</a> - search, pages made simple</li>"
+  "<li><a href=\"https://en.wikipedia.org/\">Wikipedia</a></li>"
+  "<li><a href=\"https://text.npr.org/\">NPR text news</a></li>"
+  "<li><a href=\"https://lite.cnn.com/\">CNN Lite</a></li>"
+  "<li><a href=\"https://www.freedos.org/\">FreeDOS</a></li></ul>";
 
 static void go(struct browser *b, const char *url, int remember)
 {
