@@ -16,6 +16,9 @@ INT 21h, INT 2Fh, program loading (EXEC) and the DOS version numbers reported by
   the machine's BIOS. The ISO also boots a small floppy image from CD on a
   BIOS.
 
+Both install on the machine's disk: the UEFI loader offers it (personal
+images), the BIOS edition has `INSTALL` (FDISK, FORMAT, SYS and a copy).
+
 Both have the same monitor, network card drivers (iPXE's), SSH, package
 manager and desktop with the browser.
 

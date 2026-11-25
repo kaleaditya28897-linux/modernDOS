@@ -73,6 +73,24 @@ files over the installed ones.
 What this does not cover: a trial that hangs with interrupts off inside
 the monitor, and power loss while `KEEP` copies (the stick is the rescue).
 
+## The BIOS edition on a disk
+
+`modernDOS-<version>-bios.img` is a hard disk image (MBR, one 64 MB FAT16
+partition): written to a USB stick it starts on a PC BIOS, with the system
+in `C:\MDOS` on the stick itself (settings, keys and packages stay).
+`INSTALL` there puts it on the machine's own disk - started from the stick
+that is disk 2 for FDISK, its first partition drive D:
+
+    INSTALL GO        on D:, a FAT partition that is there (files stay,
+                      the boot sector is replaced)
+    INSTALL NEW       an empty disk: one partition over the whole disk
+                      (erases it); restart from the stick, then
+    INSTALL FORMAT    formats D:, then installs
+
+It uses the kernel's SYS and FreeDOS FDISK, FORMAT and XCOPY, copies
+`C:\MDOS` with the SSH keys, and sets the partition active. Test:
+`tests/bios`.
+
 ## One card, several sessions
 
 The packet driver is loaded before the DOS sessions are forked, so every

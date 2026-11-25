@@ -199,6 +199,7 @@ ECHO   MDVMM NEW    another DOS session (Ctrl+Alt+F1..F4 switch)
 ECHO   NET          the SSH server (needs AUTHKEYS.TXT or SSHD /PASSWD)
 ECHO   PKG          package manager; SSH: the SSH client
 ECHO   MDLOG        the monitor's log; MDLOG /N with the network card's state
+ECHO   INSTALL      put modernDOS on this machine's hard disk
 ECHO.
 SET SSHDIR=C:\\MDOS\\SSH
 SET WATTCP.CFG=C:\\MDOS\\SSH
@@ -212,7 +213,63 @@ PKTDRV.COM >NUL
 SSHSLOT.COM 2 >NUL
 IF EXIST C:\\MDOS\\SSH\\AUTHKEYS.TXT CALL C:\\MDOS\\NET.BAT
 EOF
-sed -i 's/$/\r/' hd/autoexec.bat
+cat > hd/install.bat <<EOF
+@ECHO OFF
+REM INSTALL - put modernDOS (BIOS edition) on this machine's hard disk.
+REM Started from the stick the stick is drive C:, the machine's own first
+REM disk is disk 2 (for FDISK) and its first partition is drive D:.
+IF "%1"=="GO" GOTO COPY
+IF "%1"=="go" GOTO COPY
+IF "%1"=="FORMAT" GOTO FORMAT
+IF "%1"=="format" GOTO FORMAT
+IF "%1"=="NEW" GOTO NEW
+IF "%1"=="new" GOTO NEW
+ECHO INSTALL - modernDOS on this machine's hard disk
+ECHO.
+ECHO   INSTALL GO       on drive D:, a FAT partition the disk already has.
+ECHO                    Its files stay. Its boot sector is replaced: another
+ECHO                    system on that partition will no longer start.
+ECHO   INSTALL NEW      for an empty disk: ERASES THE WHOLE DISK and makes
+ECHO                    one partition. Then restart from the stick (MDSYS
+ECHO                    REBOOT) and run INSTALL FORMAT.
+ECHO   INSTALL FORMAT   formats drive D: (ERASES IT), then installs.
+ECHO.
+ECHO   FDISK 2 /INFO shows the disk. After the installation: take the stick
+ECHO   out and restart.
+GOTO END
+:NEW
+ECHO Making one partition on disk 2 (the whole disk)...
+FDISK 2 /DELETEALL
+FDISK 2 /PRI:MAX
+FDISK 2 /ACTIVATE:1
+FDISK 2 /IPL
+ECHO.
+ECHO Restart now (MDSYS REBOOT), from the stick again, then: INSTALL FORMAT
+GOTO END
+:FORMAT
+FORMAT D: /V:MODERNDOS /Q /U /Z:seriously
+IF ERRORLEVEL 1 GOTO FAILED
+:COPY
+IF NOT EXIST D:\\NUL GOTO NODRIVE
+ECHO Installing on drive D: ...
+SYS C: D:
+IF ERRORLEVEL 1 GOTO FAILED
+XCOPY C:\\MDOS D:\\MDOS /E /I /Y /H /Q
+IF ERRORLEVEL 1 GOTO FAILED
+COPY /Y C:\\FDCONFIG.SYS D:\\ >NUL
+COPY /Y C:\\AUTOEXEC.BAT D:\\ >NUL
+FDISK 2 /ACTIVATE:1
+ECHO.
+ECHO modernDOS is installed. Take the stick out and restart (MDSYS REBOOT).
+GOTO END
+:NODRIVE
+ECHO There is no drive D: - the disk has no FAT partition (see INSTALL NEW).
+GOTO END
+:FAILED
+ECHO INSTALL: that did not work; nothing more was done.
+:END
+EOF
+sed -i 's/$/\r/' hd/autoexec.bat hd/install.bat
 "$NASM" -f bin -o mbr.bin "$HERE/mbr.asm"
 # CHS only: the partition is small and near the start of the disk, and
 # old BIOSes have nothing else
@@ -234,6 +291,13 @@ for f in $BASE $MORE; do
   esac
 done
 mcopy -i "$HD" wattcp.cfg ::/MDOS/SSH/WATTCP.CFG
+# INSTALL and what it needs: the kernel's SYS, FreeDOS FDISK, FORMAT, XCOPY
+mcopy -i "$HD" hd/install.bat ::/MDOS/INSTALL.BAT
+mcopy -i "$HD" "$ROOT/sys/sys.com" ::/MDOS/SYS.COM
+mcopy -i "$HD" /opt/fdos/bin/fdisk.exe ::/MDOS/FDISK.EXE
+mcopy -i "$HD" /opt/fdos/bin/fdisk.ini ::/MDOS/FDISK.INI
+mcopy -i "$HD" /opt/fdos/bin/format.exe ::/MDOS/FORMAT.EXE
+mcopy -i "$HD" /opt/fdos/bin/xcopy.exe ::/MDOS/XCOPY.EXE
 if [ -n "$PERSONAL" ]; then
   for f in "$PERSONAL"/*; do
     [ -f "$f" ] && mcopy -i "$HD" "$f" "::/MDOS/SSH/$(basename "$f" | tr a-z A-Z)"

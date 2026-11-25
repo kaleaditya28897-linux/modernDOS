@@ -61,6 +61,8 @@ Network (new, little tested on real machines)
   PKG            package manager (UEFI boots): PKG UPDATE, LIST, INSTALL
 In the desktop (MDDESK): Terminal (a DOS prompt in a window)
 and Browser (http and https pages as text).
+The BIOS edition (the -bios.img disk image) has INSTALL: it puts
+modernDOS on the machine's hard disk (INSTALL alone says how).
 A stick made as a personal image offers to install modernDOS on the
 machine's disk; an installed machine is updated over SSH (TRYBOOT, KEEP).
 From another machine: ssh, sftp and scp to the address SSHD prints; DOS

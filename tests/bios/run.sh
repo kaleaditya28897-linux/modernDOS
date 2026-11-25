@@ -86,4 +86,24 @@ if boot "USB stick (UHCI), rtl8139" -usb -drive if=none,id=stick,format=raw,file
   dosgrep "a page over http" "HTTPGET: ok" 'HTTPGET http://10.0.2.2:8379/'
 fi
 stop
+# INSTALL: from the stick onto an empty hard disk, then the disk alone
+truncate -s 300M target.img
+if boot "stick and an empty hard disk" -usb -drive if=none,id=stick,format=raw,file=disk.img \
+     -device usb-storage,drive=stick,bootindex=0 -drive file=target.img,format=raw,if=ide \
+     -nic $NET,model=e1000; then
+  dosgrep "INSTALL NEW: a partition on the disk" "INSTALL FORMAT" 'INSTALL NEW'
+  dos 'MDSYS REBOOT' > /dev/null 2>&1 || true
+  sleep 5
+  for i in $(seq 1 120); do [ "$(grep -ac "sshd: listening" debug.log)" -ge 2 ] && break; sleep 1; done
+  dosgrep "INSTALL FORMAT: formatted and installed" "modernDOS is installed" 'INSTALL FORMAT'
+  dos 'MDSYS REBOOT' > /dev/null 2>&1 || true
+  sleep 3
+fi
+stop
+if boot "the hard disk alone" -drive file=target.img,format=raw,if=ide -nic $NET,model=e1000; then
+  dosgrep "the installed system: C:\\MDOS" "MDVMM *COM" 'DIR C:\MDOS\MDVMM.COM'
+  dosgrep "the volume is the formatted one" "MODERNDOS" 'VOL C:'
+  [ "$(wc -l < "$WORK/known")" = 1 ] && ok "the host key came along" || bad "another host key"
+fi
+stop
 if [ $fail = 0 ]; then echo "BIOS TEST: success"; exit 0; else echo "BIOS TEST: failure"; exit 1; fi
