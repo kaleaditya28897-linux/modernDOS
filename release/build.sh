@@ -129,9 +129,9 @@ cat > net.bat <<EOF
 REM the SSH server, with a local DOS prompt beside it (session 3,
 REM Ctrl+Alt+F4). AUTOEXEC.BAT started the job slots for remote shells
 REM (sessions 1 and 2) and the packet driver.
-A:\\MDVMM.COM NEW
+MDVMM.COM NEW
 ECHO SSH server starting. Esc stops it. Ctrl+Alt+F4: a DOS prompt, Ctrl+Alt+F1: back.
-A:\\SSHD.EXE
+SSHD.EXE
 EOF
 printf 'my_ip = dhcp\r\n' > wattcp.cfg
 sed -i 's/$/\r/' autoexec.bat net.bat tryboot.bat keep.bat
@@ -182,6 +182,65 @@ if [ -n "$PERSONAL" ]; then
 fi
 mdir -i uefi.img ::
 
+# The BIOS edition: a hard disk image (MBR, one active 64 MB FAT16
+# partition) for a USB stick or a disk, started by a PC BIOS. The system is
+# in C:\MDOS; C: is the stick or disk itself, so everything is kept.
+echo "== BIOS disk image"
+mkdir -p hd
+printf 'DEVICE=C:\\MDOS\\HIMEMX.EXE\r\nDOS=HIGH\r\nSHELL=C:\\COMMAND.COM C:\\ /E:1024 /P\r\n' > hd/fdconfig.sys
+cat > hd/autoexec.bat <<EOF
+@ECHO OFF
+PROMPT \$P\$G
+PATH C:\\MDOS;C:\\
+ECHO.
+ECHO modernDOS $VERSION (BIOS edition) - see C:\\MDOS\\README.TXT
+ECHO   MDDESK       the desktop
+ECHO   MDVMM NEW    another DOS session (Ctrl+Alt+F1..F4 switch)
+ECHO   NET          the SSH server (needs AUTHKEYS.TXT or SSHD /PASSWD)
+ECHO   PKG          package manager; SSH: the SSH client
+ECHO   MDLOG        the monitor's log; MDLOG /N with the network card's state
+ECHO.
+SET SSHDIR=C:\\MDOS\\SSH
+SET WATTCP.CFG=C:\\MDOS\\SSH
+SET TEMP=C:\\MDOS\\TEMP
+SET PKGDIR=C:\\MDOS
+CTMOUSE.EXE >NUL
+MDVMM.COM
+REM DOS sessions for remote shells, then the packet driver (this order:
+REM the sessions must not carry a copy of it)
+SSHSLOT.COM 2 >NUL
+PKTDRV.COM >NUL
+IF EXIST C:\\MDOS\\SSH\\AUTHKEYS.TXT CALL C:\\MDOS\\NET.BAT
+EOF
+sed -i 's/$/\r/' hd/autoexec.bat
+"$NASM" -f bin -o mbr.bin "$HERE/mbr.asm"
+# CHS only: the partition is small and near the start of the disk, and
+# old BIOSes have nothing else
+"$NASM" "$TEST/ldosboot/boot.asm" -w-user -I"$TEST/lmacros/" \
+  -D_COMPAT_FREEDOS=1 -D_FAT16=1 -D_UNIT=80h -D_LBA=0 -D_RPL=0 -o boot16.bin
+"$NASM" "$TEST/bootimg/bootimg.asm" -I ./ -I"$TEST/bootimg/" -I"$TEST/lmacros/" \
+  -D_PAYLOADFILE="::rename,'$KERNEL',KERNEL.SYS,hd/fdconfig.sys,hd/autoexec.bat" \
+  -D_BOOTPATCHFILE="'boot16.bin'" -D_MBRPATCHFILE="'mbr.bin'" \
+  -D_WARN_DEFAULT_OFF=1 -D_WARN_TOOMANYFAT=0 -D_WARN_ALIGNDATA=0 \
+  -D_MBR -D_MBR_PART_TYPE=ptFAT16 -D_BPE=16 -D_SPC=4 -D_SPI=131072 -D_SPF=128 \
+  -D_NUMROOT=512 -D_CHS_SECTORS=63 -D_CHS_HEADS=16 -D_UNIT=80h -o bios.img
+HD="bios.img@@$((1008 * 512))"          # the partition (after one cylinder)
+mcopy -i "$HD" /opt/fdos/bin/command.com ::COMMAND.COM
+mmd -i "$HD" ::/MDOS ::/MDOS/SSH ::/MDOS/TEMP
+for f in $BASE $MORE; do
+  case "${f%%=*}" in
+    COMMAND.COM|AUTOEXEC.BAT|TRYBOOT.BAT|KEEP.BAT|WATTCP.CFG) ;;   # not here / UEFI only
+    *) mcopy -i "$HD" "${f#*=}" "::/MDOS/${f%%=*}" ;;
+  esac
+done
+mcopy -i "$HD" wattcp.cfg ::/MDOS/SSH/WATTCP.CFG
+if [ -n "$PERSONAL" ]; then
+  for f in "$PERSONAL"/*; do
+    [ -f "$f" ] && mcopy -i "$HD" "$f" "::/MDOS/SSH/$(basename "$f" | tr a-z A-Z)"
+  done
+fi
+mdir -i "$HD" ::/MDOS | tail -3
+
 echo "== EFI system partition image"
 # 30 MB, FAT16: an El Torito EFI image must stay below 32 MB (16 bit sector
 # count), which rules out FAT32; room for the report files and more
@@ -218,5 +277,7 @@ xorriso -as mkisofs -o "$ISO" -V "MODERNDOS" -R -J \
   -append_partition 2 0xef efiboot.img -appended_part_as_gpt \
   iso 2>&1 | grep -v "^xorriso : UPDATE" || true
 [ -f "$ISO" ] || { echo "xorriso failed"; exit 1; }
-(cd "$OUT" && sha256sum "$(basename "$ISO")" > "$(basename "$ISO").sha256")
+cp bios.img "$OUT/modernDOS-$VERSION-bios.img"
+(cd "$OUT" && sha256sum "$(basename "$ISO")" > "$(basename "$ISO").sha256" &&
+  sha256sum "modernDOS-$VERSION-bios.img" > "modernDOS-$VERSION-bios.img.sha256")
 ls -l "$OUT"

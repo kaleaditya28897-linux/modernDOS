@@ -4,7 +4,7 @@
 # One boot floppy, booted twice: from DOS (SeaBIOS) and from UEFI (OVMF,
 # BOOTX64.EFI). QEMU gives an e1000 on its user network (DHCP, gateway
 # 10.0.2.2 = the container). AUTOEXEC.BAT loads HIMEMX, MDVMM and PKTDRV
-# (the packet driver on MDVMM's network card drivers: the native e1000
+# (the packet driver on MDVMM's network card drivers: iPXE's e1000
 # driver on DOS boots, iPXE's drivers on UEFI boots), then runs
 #   NETCHK   - ARP through the packet driver (no TCP/IP stack)
 #   NETTEST  - Watt-32 (DJGPP): DHCP, then a TCP connection to a server
@@ -141,9 +141,14 @@ run() {   # run name -- qemu args
 
 echo "== DOS boot"
 run "DOS boot" "$QEMU" -drive file=disk.img,format=raw,if=floppy
+# both boots use iPXE's drivers: the other network cards QEMU has
+for MODEL in rtl8139 pcnet virtio-net-pci i82559er e1000e; do
+  echo "== DOS boot, $MODEL"
+  run "DOS $MODEL" "$QEMU" -drive file=disk.img,format=raw,if=floppy
+done
+unset MODEL
 echo "== UEFI boot"
 run "UEFI boot" qemu-system-x86_64 -bios "$OVMF" -drive file=esp.img,format=raw,if=ide
-# UEFI boots use iPXE's drivers: the other network cards QEMU has
 for MODEL in e1000e rtl8139 pcnet virtio-net-pci vmxnet3 i82559er; do
   echo "== UEFI boot, $MODEL"
   run "UEFI $MODEL" qemu-system-x86_64 -bios "$OVMF" -drive file=esp.img,format=raw,if=ide

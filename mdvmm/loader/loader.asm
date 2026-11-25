@@ -1,7 +1,7 @@
 ; MDVMM.COM - DOS loader for the modernDOS virtual machine monitor
 ;
-; Checks the machine, takes a memory pool from XMS, copies the 32-bit
-; core into it, switches to protected mode and jumps to the core. The
+; Checks the machine, takes a memory pool from XMS, reads the 32-bit
+; core from the end of its own file (see mz.asm) into it, switches to protected mode and jumps to the core. The
 ; core enables paging (through 'tramp' below), takes over interrupts and
 ; resumes this program at 'resumed' - now running in V86 mode. The loader
 ; then stays resident with only its small V86 stub area.
@@ -113,25 +113,74 @@ main:
         and     ecx, 0fffff000h
         mov     [bi + bootinfo.pool_size], ecx
 
-        ; copy the core image to the start of the aligned pool
-        mov     dword [xmove + 0], core_end - core_image
-        mov     word [xmove + 4], 0             ; source: conventional
-        mov     word [xmove + 6], core_image
+        ; read the core from this program's file (it follows the loader
+        ; there) to the start of the aligned pool, 16 KB at a time
+        push    es
+        mov     es, [2ch]               ; environment: strings, 0, count, path
+        xor     di, di
+        xor     al, al
+        mov     cx, 0ffffh
+.env:   repne scasb
+        scasb
+        jne     .env
+        add     di, 2
+        push    ds
+        push    es
+        pop     ds
+        mov     dx, di
+        mov     ax, 3d00h               ; open, read only
+        int     21h
+        pop     ds
+        pop     es
+        jc      err_core
+        mov     bx, ax
+        mov     ax, 4200h
+        xor     cx, cx
+        mov     dx, CORE_OFFSET
+        int     21h
+        jc      err_core
+.read:  mov     ah, 3fh
+        mov     cx, 4000h
+        mov     dx, iobuf
+        int     21h
+        jc      err_core
+        test    ax, ax
+        jz      .read_done
+        push    ax
+        inc     ax
+        and     ax, 0fffeh              ; XMS moves even lengths
+        movzx   eax, ax
+        mov     [xmove + 0], eax
+        mov     word [xmove + 4], 0     ; source: conventional
+        mov     word [xmove + 6], iobuf
         mov     [xmove + 8], cs
         mov     ax, [xms_handle]
         mov     [xmove + 10], ax
         mov     eax, [align_skip]
+        add     eax, [core_bytes]
         mov     [xmove + 12], eax
+        push    bx
         mov     si, xmove
         mov     ah, 0bh
         call    far [xms_entry]
+        pop     bx
+        pop     cx
         test    ax, ax
         jz      err_copy
+        movzx   ecx, cx
+        add     [core_bytes], ecx
+        jmp     .read
+.read_done:
+        mov     ah, 3eh
+        int     21h
+        cmp     dword [core_bytes], 1000h
+        jb      err_core
 
         ; boot information for the core
         mov     dword [bi + bootinfo.magic], BOOTINFO_MAGIC
         mov     dword [bi + bootinfo.version], BOOTINFO_VERSION
-        mov     dword [bi + bootinfo.core_size], core_end - core_image
+        mov     eax, [core_bytes]
+        mov     [bi + bootinfo.core_size], eax
         xor     ebx, ebx
         mov     bx, cs
         shl     ebx, 4                  ; ebx = linear base of this segment
@@ -459,6 +508,8 @@ err_lock:   mov     dx, msg_lock
             jmp     fail
 err_copy:   mov     dx, msg_copy
             jmp     fail
+err_core:   mov     dx, msg_core
+            jmp     fail
 err_resume: mov     dx, msg_resume
 fail:
         call    print
@@ -479,6 +530,7 @@ msg_xms     db  'MDVMM needs an XMS driver (e.g. DEVICE=HIMEMX.EXE).', 13, 10, '
 msg_mem     db  'Not enough free extended memory.', 13, 10, '$'
 msg_lock    db  'Could not lock extended memory.', 13, 10, '$'
 msg_copy    db  'Could not copy the monitor to extended memory.', 13, 10, '$'
+msg_core    db  'Could not read the monitor from MDVMM.COM.', 13, 10, '$'
 msg_resume  db  'Monitor did not answer after start.', 13, 10, '$'
 msg_nosess  db  'DOS kernel does not support sessions (no instance data).', 13, 10, '$'
 msg_usage   db  'Usage: MDVMM            load the monitor', 13, 10
@@ -507,6 +559,7 @@ xms_handle  dw  0
 pool_kb     dw  0
 pool_raw    dd  0
 align_skip  dd  0
+core_bytes  dd  0
 xmove       times 16 db 0               ; XMS move structure
 pm32_ptr    dd  0
             dw  08h
@@ -529,7 +582,7 @@ pm_stack_top:
 transient_end:                          ; MDVMM NEW keeps memory up to here
 
         align   16
-core_image:
-        incbin  "core_dos.bin"
-        align   2, db 0
-core_end:
+image_end:
+; the core follows the loader in the file (after mz.asm's 32 byte header)
+CORE_OFFSET equ 32 + (image_end - $$)
+iobuf       equ image_end               ; 16 KB, in the memory after the image

@@ -1,5 +1,5 @@
 # MDVMM - modernDOS virtual machine monitor
-# Builds build/MDVMM.COM (16-bit DOS loader with the 32-bit core embedded)
+# Builds build/MDVMM.COM (16-bit DOS loader with the 32-bit core appended)
 # and build/BOOTX64.EFI (UEFI loader with the same core embedded).
 
 CC      = i686-linux-gnu-gcc
@@ -16,12 +16,13 @@ CFLAGS  = -m32 -std=gnu11 -O2 -Wall -Wextra -Werror \
 NFLAGS  = -Iinclude/
 
 B       = build
-# core objects; the UEFI core adds the virtual BIOS and native drivers,
-# the DOS core (MDVMM.COM, 64 KB limit) has stubs instead
+# core objects; the UEFI core adds the virtual BIOS and native drivers for
+# disks, screen and input, the DOS core has stubs instead (the machine's
+# BIOS does that); both have iPXE's network drivers
 COBJS   = $(B)/entry.o $(B)/main.o $(B)/lib.o $(B)/mm.o $(B)/cpu.o $(B)/v86.o $(B)/dpmi.o \
-          $(B)/vm.o $(B)/dma.o $(B)/pci.o $(B)/nic.o $(B)/e1000.o
+          $(B)/vm.o $(B)/dma.o $(B)/pci.o $(B)/nic.o $(B)/ipxenic.o $(B)/ipxe.o
 UEFIOBJS = $(B)/bios.o $(B)/fbcon.o $(B)/font.o $(B)/romimg.o $(B)/ahci.o $(B)/nvme.o \
-          $(B)/xhci.o $(B)/usbkbd.o $(B)/mouse.o $(B)/apic.o $(B)/uhci.o $(B)/ipxenic.o $(B)/ipxe.o
+          $(B)/xhci.o $(B)/usbkbd.o $(B)/mouse.o $(B)/apic.o $(B)/uhci.o
 DOSOBJS = $(B)/nobios.o
 HDRS    = core/core.h include/bootinfo.h
 
@@ -61,8 +62,14 @@ $(B)/core_dos.elf: $(COBJS) $(DOSOBJS) core/core.ld
 $(B)/%.bin: $(B)/%.elf
 	$(OBJCOPY) -O binary $< $@
 
-$(B)/MDVMM.COM: loader/loader.asm $(B)/core_dos.bin include/bootinfo.inc
-	$(NASM) $(NFLAGS) -I$(B)/ -f bin -o $@ $<
+# MDVMM.COM is an MZ program laid out like a .COM (loader/mz.asm), with
+# the core appended: the loader reads it from its own file, so the core
+# is not held to 64 KB
+$(B)/loader.bin: loader/loader.asm include/bootinfo.inc | $(B)
+	$(NASM) $(NFLAGS) -f bin -o $@ $<
+
+$(B)/MDVMM.COM: loader/mz.asm $(B)/loader.bin $(B)/core_dos.bin
+	$(NASM) -I$(B)/ -DLSIZE=$$(stat -c %s $(B)/loader.bin) -f bin -o $@ $<
 
 $(B)/uefi_main.o: uefi/main.c uefi/efi.h uefi/loader.h include/bootinfo.h | $(B)
 	$(CC64) $(CFLAGS64) -c -o $@ $<

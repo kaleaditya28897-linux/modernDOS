@@ -38,6 +38,9 @@ struct session {
   uint8_t kq[KQ_SIZE];                  /* queued scancodes */
   int kq_head, kq_tail;
   int slot;                             /* a job slot (SSHSLOT.COM) */
+  int in13;                             /* inside INT 13h (flat mode) */
+  uint16_t in13_cs, in13_ip;            /* where the call returns */
+  uint32_t in13_since;
   int job;                              /* JOB_* */
   uint16_t job_flags, job_code;
   char cmd[128];
@@ -57,6 +60,17 @@ static struct range ranges[MAX_RANGES];
 static int nranges;
 static uint32_t inst_size;              /* bytes of instance data */
 static uint32_t first_private;          /* first private page number */
+static uint32_t end_private = 0xa0;     /* the page after the last private one */
+/* DOS boots: session memory is not remapped but copied on a switch, so
+   that a linear address below 640K is always the physical one. The
+   machine's BIOS counts on that: disk code that runs in system management
+   mode (USB sticks, SeaBIOS and real firmware alike) reads the caller's
+   buffers and stack by physical address, and so does bus master and ISA
+   DMA hardware. pages[] then holds a session's memory while it is not the
+   running one. UEFI boots (the monitor's own BIOS) remap instead. */
+static int flat;
+/* (and no switch while a session is inside the BIOS disk service: its
+   transfer may be under way to physical memory) */
 static int registered;
 static int cur, focus, nsessions = 1;
 static int want = -1;                   /* session to switch to */
@@ -128,9 +142,31 @@ static int vm_register(struct frame *f)
   }
   add_range(far_lin(cds), cds_size);
   first_private = (uint32_t)boundary >> 8;
+  {
+    /* The BIOS's own memory at the top of the 640 KB (the extended BIOS
+       data area, above the size in 40:13) is one for all sessions and
+       stays where it is: a BIOS disk driver has its controller's data
+       there (SeaBIOS: USB), which the hardware reads by physical address.
+       DOS memory in the same page as its start is copied on a switch. */
+    uint32_t top = (uint32_t)*(const uint16_t *)rm_ptr(0x40, 0x13) << 10;
+    if (top > 0xa0000 || top < 0x80000)
+      top = 0xa0000;
+    end_private = top >> 12;
+    if (top & 0xfff)
+      add_range(end_private << 12, top & 0xfff);
+  }
+  if (boot.boot_type != BOOT_UEFI)
+  {
+    uint32_t p;
+    flat = 1;
+    for (p = first_private; p < end_private; p++)
+      if (!(ses[0].pages[p] = page_alloc()))
+        return 0;
+  }
   ses[0].used = 1;
   registered = 1;
-  kprintf("vm: sessions enabled, private memory %05x-9FFFF\n", first_private << 12);
+  kprintf("vm: sessions enabled, private memory %05x-%05x%s\n", first_private << 12,
+          (end_private << 12) - 1, flat ? " (copied on a switch)" : "");
   return 1;
 }
 
@@ -161,7 +197,7 @@ static void map_session(int n)
   struct session *s = &ses[n];
   uint32_t p;
 
-  for (p = first_private; p < 0xa0; p++)
+  for (p = first_private; p < end_private && !flat; p++)
     map_page(p << 12, s->pages[p] ? s->pages[p] : p << 12, 7);
   for (p = 0; p < VRAM_PAGES; p++)
     map_page(VRAM + p * 4096, n == focus ? vram_phys[p] : s->vram[p], 7);
@@ -205,7 +241,38 @@ static int switchable(const struct frame *f, uint16_t isr_ignore)
 {
   int ifl = (f->eflags & EFL_VM) ? (int)vm1.vif : !!(f->eflags & EFL_IF);
 
+  /* inside the BIOS disk service (unless that call is 20 seconds old:
+     then the program has left it some other way) */
+  if (ses[cur].in13 && ticks - ses[cur].in13_since < 20 * 18)
+    return 0;
   return ifl && !vm_hold && !crit && !(pic_isr() & ~isr_ignore);
+}
+
+/* A V86 program calls INT 13h (f: the return address, before the call
+   is reflected). Flat mode: the call returns to a breakpoint instead, so
+   the monitor knows when the BIOS is done. */
+void vm_int13(struct frame *f)
+{
+  struct session *s = &ses[cur];
+
+  if (!flat || (s->in13 && ticks - s->in13_since < 20 * 18))
+    return;
+  s->in13 = 1;
+  s->in13_cs = (uint16_t)f->cs;
+  s->in13_ip = (uint16_t)f->eip;
+  s->in13_since = ticks;
+  f->cs = boot.stub_seg;
+  f->eip = boot.stub_bp + BP_INT13;
+}
+
+/* the breakpoint: back to the caller */
+void vm_int13_done(struct frame *f)
+{
+  struct session *s = &ses[cur];
+
+  f->cs = s->in13_cs;
+  f->eip = s->in13_ip;
+  s->in13 = 0;
 }
 
 static int next_session(void)
@@ -258,6 +325,14 @@ static void __attribute__((noreturn)) switch_to(struct frame *f, int n, int save
   }
   if (vm_trace)
     kprintf("vm: %d -> %d (%s)\n", cur, n, (b->f.eflags & EFL_VM) ? "v86" : "pm");
+  if (flat)
+  {
+    uint32_t p;
+    for (p = first_private; p < end_private && save; p++)
+      memcpy(kmap(2, a->pages[p]), (void *)(p << 12), 4096);
+    for (p = first_private; p < end_private; p++)
+      memcpy((void *)(p << 12), kmap(2, b->pages[p]), 4096);
+  }
   cur = n;
   map_session(n);
   inst_copy(b, 0);
@@ -452,7 +527,7 @@ static int alloc_session_pages(struct session *s)
 {
   uint32_t p, n;
 
-  for (p = first_private; p < 0xa0; p++)
+  for (p = first_private; p < end_private; p++)
     if (!(s->pages[p] = page_alloc()))
       return 0;
   for (p = 0; p < VRAM_PAGES; p++)
@@ -472,7 +547,7 @@ static void free_session_pages(struct session *s)
 {
   uint32_t p, n;
 
-  for (p = first_private; p < 0xa0; p++)
+  for (p = first_private; p < end_private; p++)
     if (s->pages[p])
       page_free(s->pages[p]);
   for (p = 0; p < VRAM_PAGES; p++)
@@ -507,8 +582,8 @@ static void vm_fork(struct frame *f)
     goto fail;
   }
   /* private memory and screen: copies of the current session's */
-  for (p = first_private; p < 0xa0; p++)
-    phys_copy(s->pages[p], ses[cur].pages[p] ? ses[cur].pages[p] : p << 12, 4096);
+  for (p = first_private; p < end_private; p++)
+    phys_copy(s->pages[p], !flat && ses[cur].pages[p] ? ses[cur].pages[p] : p << 12, 4096);
   for (p = 0; p < VRAM_PAGES; p++)
     memcpy(kmap(2, s->vram[p]), (void *)(VRAM + p * 4096), 4096);
   inst_copy(s, 1);

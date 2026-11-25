@@ -6,7 +6,20 @@ modernDOS
 ### Compatibility contract
 INT 21h, INT 2Fh, program loading (EXEC) and the DOS version numbers reported by INT 21h/30h are frozen. New features are added on top of them and never change their existing behavior.
 
-### Roadmap
+### Editions
+
+- **UEFI** (`modernDOS-<version>.iso`, CD or USB stick): for current
+  machines. The monitor brings its own BIOS and drivers (AHCI, NVMe, USB,
+  graphics).
+- **BIOS** (`modernDOS-<version>-bios.img`, a disk image for a USB stick
+  or hard disk): for older machines; disks, screen and keyboard go through
+  the machine's BIOS. The ISO also boots a small floppy image from CD on a
+  BIOS.
+
+Both have the same monitor, network card drivers (iPXE's), SSH, package
+manager and desktop with the browser.
+
+## Roadmap
 | # | Milestone | Status |
 |---|---|---|
 | M1 | Kernel modernization: reproducible container build, QEMU boot tests, native long-filename (LFN) API in the kernel (`docs/lfnapi.txt`) | done |

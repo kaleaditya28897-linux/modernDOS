@@ -51,4 +51,5 @@ BP_DPMI_ENTRY    equ 0
 BP_RM_RETURN     equ 1
 BP_RAW_TO_PM     equ 2
 BP_CALLBACK      equ 3            ; 16 real mode callbacks
-BP_COUNT         equ 19
+BP_INT13         equ 19           ; a V86 INT 13h call returned
+BP_COUNT         equ 20

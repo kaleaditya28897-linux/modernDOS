@@ -177,7 +177,7 @@ for marker in "MDVMM core:" "v86: entering VM1" "v86chk: protected mode bit set"
               "xmstest: 4K round trip" "RESULT: PASSED" "dpmi: 32 bit client" \
               "DJGPP: 0 failures" "DPMI: 0 failures" "vm: sessions enabled" \
               "vm: session 1 started" "vm: focus session 1" "vm: session 1 ended" \
-              "SESSIONS: 0 failures" "nic: Intel e1000" "Packet driver at INT 60h" "netchk: ARP reply from 10.0.2.2" "GFXTEST: text mode again"; do
+              "SESSIONS: 0 failures" "nic: 82540em (iPXE)" "Packet driver at INT 60h" "netchk: ARP reply from 10.0.2.2" "GFXTEST: text mode again"; do
   if grep -q "$marker" debug.log; then echo "  ok   log: $marker"; else
     echo "  FAIL log missing: $marker"; fail=1; fi
 done

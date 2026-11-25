@@ -1,6 +1,6 @@
 /* MDVMM core - network cards
  *
- * Drivers (iPXE's through ipxenic.c, the native e1000.c) register a `struct nic`; DOS reaches the
+ * Drivers (iPXE's, through ipxenic.c) register a `struct nic`; DOS reaches the
  * first one through INT 2Fh AH=DEh (PKTDRV.COM turns that into a standard
  * packet driver):
  *   AX=DE10h  info: ES:DI <- 6-byte MAC, AX = MTU (frame bytes without
@@ -44,12 +44,7 @@ void nic_init(void)
     kprintf("nic: network drivers skipped (\\MDOS\\NONET)\n");
     return;
   }
-  /* UEFI boots: iPXE's drivers (many cards); DOS boots: the small native
-     driver (MDVMM.COM has no room for more) */
-  if (boot.boot_type == BOOT_UEFI)
-    ipxenic_init();
-  else
-    e1000_init();
+  ipxenic_init();                       /* iPXE's drivers, on DOS and UEFI boots */
 }
 
 static void set_cf(struct frame *f, int on)

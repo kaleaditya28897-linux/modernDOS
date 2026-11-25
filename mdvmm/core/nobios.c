@@ -1,7 +1,7 @@
 /* MDVMM core - stubs for the core linked into MDVMM.COM. Started from
    DOS, the machine has a PC BIOS: the virtual BIOS and the native drivers
-   (bios.c, fbcon.c, font.c, rom.asm, pci.c, ahci.c) are only linked into
-   the UEFI loader's core, which keeps MDVMM.COM well below 64 KB. */
+   for disks, screen and input (bios.c, fbcon.c, font.c, rom.asm, ahci.c,
+   ...) are only linked into the UEFI loader's core. */
 #include "core.h"
 
 void bios_init(void)
@@ -37,10 +37,6 @@ void fbcon_log(char c)
 }
 
 void fbcon_panic(void)
-{
-}
-
-void ipxenic_init(void)
 {
 }
 

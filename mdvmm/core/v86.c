@@ -399,7 +399,11 @@ static void v86_gp(struct frame *f)
       uint8_t vec = fetch8(f, ip + len);
       f->eip = (uint16_t)(ip + len + 1);
       if (!intercept(f, vec))
+      {
+        if (vec == 0x13)
+          vm_int13(f);
         v86_reflect(f, vec);
+      }
       return;
     }
     case 0xcc:                  /* INT3 */
@@ -414,7 +418,10 @@ static void v86_gp(struct frame *f)
     case 0xf4:                  /* HLT (or a DPMI breakpoint) */
       if (f->cs == boot.stub_seg && ip >= boot.stub_bp && ip < boot.stub_bp + BP_COUNT)
       {
-        dpmi_v86_bp(f, ip - boot.stub_bp);
+        if (ip - boot.stub_bp == BP_INT13)
+          vm_int13_done(f);
+        else
+          dpmi_v86_bp(f, ip - boot.stub_bp);
         return;
       }
       if (bios_bp(f, ip))

@@ -36,6 +36,9 @@ def files(mouse, sock, log, shot):
     time.sleep(0.5)
     mouse.click(*point(log, "files_newfolder"))
     wait(log, "MDDESK: widget dialogfield", 5)
+    # typing at once lost the first keys in about one run of four on DOS
+    # boots ("Folder" instead of "Test Folder"); not explained yet
+    time.sleep(0.5)
     type_text(sock, "Test Folder\n")
     wait(log, "MDDESK: created", 10)
     time.sleep(0.5)

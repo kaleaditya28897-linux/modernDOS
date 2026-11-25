@@ -191,3 +191,38 @@ void panic_frame(struct frame *f, const char *why)
   halt_forever();
   __builtin_unreachable();
 }
+
+/* IRQ0 pending at the master PIC? Acknowledges it there (poll mode). */
+static int pic_poll_irq0(void)
+{
+  uint8_t v;
+
+  outb(0x20, 0x0c);                     /* OCW3: poll */
+  v = inb(0x20);
+  if (!(v & 0x80))
+    return 0;
+  outb(0x20, 0x60 | (v & 7));           /* specific EOI */
+  return (v & 7) == 0;
+}
+
+/* wait `ticks` timer ticks (55 ms each) with interrupts off, by polling
+   the PIC; returns 0 if the timer does not tick */
+int pit_wait(uint32_t ticks)
+{
+  uint8_t mask = inb(0x21);
+  uint32_t i, spin;
+
+  outb(0x21, 0xfe);                     /* only IRQ0 */
+  for (i = 0; i < ticks; i++)
+  {
+    for (spin = 0; spin < 3000000 && !pic_poll_irq0(); spin++)
+      ;
+    if (spin == 3000000)
+    {
+      outb(0x21, mask);
+      return 0;
+    }
+  }
+  outb(0x21, mask);
+  return 1;
+}

@@ -152,6 +152,8 @@ int dpmi_active(void);
 int dpmi_owner(void);
 void dpmi_hwirq(struct frame *f, int irq);
 int vm_current(void);
+void vm_int13(struct frame *f);
+void vm_int13_done(struct frame *f);
 int vm_has_focus(void);
 uint8_t *vm_focus_bda(void);
 extern int vm_hold;
@@ -229,7 +231,7 @@ void mouse_input(int buttons, int dx, int dy);
 int mouse_text_cell(void);
 void int33(struct frame *f);
 
-/* nic.c, e1000.c: network cards (DOS and UEFI boots) */
+/* nic.c: network cards (DOS and UEFI boots) */
 struct nic {
   const char *name;
   uint8_t mac[6];
@@ -243,7 +245,6 @@ void machine_reset(void);
 void nic_register(struct nic *n);
 void nic_init(void);
 void nic_api(struct frame *f);
-void e1000_init(void);
 void ipxenic_init(void);
 
 /* dma.c */

@@ -1,4 +1,4 @@
-/* MDVMM core - network cards through iPXE's drivers (UEFI boots)
+/* MDVMM core - network cards through iPXE's drivers
  *
  * mdvmm/ipxe builds iPXE's PCI network drivers into one object with a
  * handful of entry points (ipxe_*, glue.c there). This file gives that

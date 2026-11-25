@@ -22,6 +22,7 @@ md_run bash -c '
   tests/ssh/host.sh || rc=1
   tests/ssh/run.sh _output/gcc/kgc8632.sys || rc=1
   tests/install/run.sh _output/gcc/kgc8632.sys || rc=1
+  tests/bios/run.sh || rc=1
   tests/pkg/host.sh || rc=1
   tests/pkg/run.sh _output/gcc/kgc8632.sys || rc=1
   for iso in _output/release/*.iso; do
