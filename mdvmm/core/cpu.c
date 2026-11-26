@@ -15,7 +15,7 @@ struct idt_entry { uint16_t off_lo, sel; uint8_t zero, type; uint16_t off_hi; } 
 struct dtr { uint16_t limit; uint32_t base; } __attribute__((packed));
 
 static struct tss tss __attribute__((aligned(16)));
-struct gdt_entry gdt_table[8] __attribute__((aligned(16)));
+struct gdt_entry gdt_table[9] __attribute__((aligned(16)));
 #define gdt gdt_table
 static struct idt_entry idt[256] __attribute__((aligned(16)));
 

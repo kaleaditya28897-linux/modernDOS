@@ -130,6 +130,27 @@ services (INT 2Fh AH=DEh, INT 15h AH=87h).
 Not yet: DPMI 1.0 functions, several clients at once (a DPMI program
 starting another one), virtual memory.
 
+### DOS extenders and other DOS programs
+
+`tests/compat` runs programs of the kinds DOS software comes in: a 16-bit
+real mode program, the same program under DOS/4GW, PMODE/W, DOS/32A and
+CauseWay, and the Open Watcom compiler and linker hosted on DOS (DOS/4GW
+programs started by a real mode driver). What they needed from the host:
+
+- `MOV r32, CR0` in V86 mode is answered (protected mode on), other
+  control and debug register moves are ignored; an instruction a program
+  cannot use here (LIDT, a switch to real mode) ends the program, not the
+  machine.
+- The I/O privilege level in the flags reads as 3 and cannot be changed,
+  as under EMM386 and Windows: that is how programs tell V86 mode from
+  real mode (DOS/32A).
+- A client's own protected mode handlers come first, also for INT 31h
+  (CauseWay adds its services there) and INT 21h AH=4Ch (DOS/4GW cleans
+  up in its handler before the program ends); they chain to the host.
+- Selector 0040h is the BIOS data area (DOS/4GW reads the timer there).
+- Real mode vectors a program leaves pointing into its own memory when it
+  ends are put back to what they were before the program set them.
+
 ## DOS sessions
 
 All sessions share one DOS kernel, as in Windows 386 enhanced mode.

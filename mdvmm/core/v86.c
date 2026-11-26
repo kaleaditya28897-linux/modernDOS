@@ -55,7 +55,7 @@ static uint32_t pop32(struct frame *f)
 uint32_t v86_vflags(struct frame *f)
 {
   return (f->eflags & (EFL_USER | EFL_AC | EFL_ID)) | 0x2 |
-      (vm1.vif ? EFL_IF : 0) | vm1.vflags;
+      (vm1.vif ? EFL_IF : 0) | EFL_IOPL | (vm1.vflags & EFL_NT);
 }
 
 static void vflags_set(struct frame *f, uint32_t v, int size32)
@@ -64,7 +64,12 @@ static void vflags_set(struct frame *f, uint32_t v, int size32)
 
   f->eflags = (f->eflags & ~mask) | (v & mask) | EFL_IF | EFL_VM;
   vm1.vif = (v & EFL_IF) != 0;
-  vm1.vflags = v & (EFL_IOPL | EFL_NT);
+  /* The I/O privilege level a program sees is 3 and stays 3, as under the
+     V86 monitors DOS programs know (EMM386, Windows): that it cannot be
+     changed is how programs tell V86 mode from real mode (DOS/32A; with a
+     changeable one it took the machine for real mode and tried to switch
+     to protected mode itself). */
+  vm1.vflags = v & EFL_NT;
 }
 
 static void set_cf(struct frame *f, int on)
@@ -228,8 +233,71 @@ static void int15_move(struct frame *f)
 }
 
 /* returns 1 if handled by the monitor, 0 to reflect to the VM */
+/* Interrupt vectors a program sets and does not put back. DOS restores
+   only INT 22h-24h when a program ends. A DOS extender that finds a DPMI
+   host may leave the vector it took in real mode before it switched
+   (DOS/4GW: INT 15h) - its own end-of-program code does not get to run in
+   real mode under a host - and the next program then calls into freed
+   memory. So the monitor notes what a vector was before a program first
+   set it, and when the program ends (not: stays resident) puts back those
+   that still point into the program's own memory. */
+#define NVECS 96
+static struct { uint16_t psp; uint8_t vec, used; uint32_t old; } vecs[NVECS];
+
+void v86_vector_set(int psp, uint8_t vec)
+{
+  int i, slot = -1;
+
+  if (psp <= 0)
+    return;
+  for (i = 0; i < NVECS; i++)
+  {
+    if (vecs[i].used && vecs[i].psp == psp && vecs[i].vec == vec)
+      return;                           /* the first value is the one to keep */
+    if (!vecs[i].used && slot < 0)
+      slot = i;
+  }
+  if (slot < 0)
+    return;
+  vecs[slot].used = 1;
+  vecs[slot].psp = (uint16_t)psp;
+  vecs[slot].vec = vec;
+  vecs[slot].old = *(const uint32_t *)(uint32_t)(vec * 4);
+}
+
+void v86_vectors_end(int psp, int resident)
+{
+  uint32_t *ivt = (uint32_t *)0, first, end;
+  int i;
+
+  if (psp <= 0)
+    return;
+  /* the program's memory block: from its PSP, the size in the MCB before it */
+  first = (uint32_t)psp;
+  end = first + *(const uint16_t *)rm_ptr((uint16_t)(psp - 1), 3);
+  for (i = 0; i < NVECS; i++)
+    if (vecs[i].used && vecs[i].psp == psp)
+    {
+      uint32_t seg = ivt[vecs[i].vec] >> 16;
+      vecs[i].used = 0;
+      if (!resident && seg >= first && seg < end && vecs[i].vec != 0x22 && vecs[i].vec != 0x23 &&
+          vecs[i].vec != 0x24)
+      {
+        kprintf("v86: INT %02xh was left pointing into the program that ended: put back\n", vecs[i].vec);
+        ivt[vecs[i].vec] = vecs[i].old;
+      }
+    }
+}
+
 static int intercept(struct frame *f, uint8_t vec)
 {
+  if (vec == 0x21 && AH(f) == 0x25)
+    v86_vector_set(dos_current_psp(), AL(f));
+  else if ((vec == 0x21 && (AH(f) == 0x4c || AH(f) == 0x00)) || vec == 0x20)
+    v86_vectors_end(dos_current_psp(), 0);
+  else if ((vec == 0x21 && AH(f) == 0x31) || vec == 0x27)
+    v86_vectors_end(dos_current_psp(), 1);
+
   if (vec == 0x15)
   {
     if (AH(f) == 0x87)
@@ -520,8 +588,66 @@ static void v86_gp(struct frame *f)
       f->eip = (uint16_t)(ip + len);
       io_out(DX(f), op == 0xee ? 1 : o32 ? 4 : 2, f->eax);
       return;
+    case 0x0f:                  /* system instructions */
+    {
+      uint8_t op2 = fetch8(f, ip + len), modrm = fetch8(f, ip + len + 1);
+      uint32_t *regs[8] = { &f->eax, &f->ecx, &f->edx, &f->ebx, &f->esp, &f->ebp, &f->esi, &f->edi };
+      uint32_t *r = regs[modrm & 7];
+      int n = (modrm >> 3) & 7;
+
+      if (op2 == 0x20 && (modrm & 0xc0) == 0xc0)
+      {
+        /* MOV r32, CRn: DOS extenders look at CR0 to see that the machine
+           is in protected mode (V86) before they ask for DPMI. They get
+           that, without the paging bit, and nothing of CR2-CR4. */
+        uint32_t cr0;
+        __asm__("mov %%cr0, %0" : "=r"(cr0));
+        *r = n == 0 ? (cr0 & 0x0000003fu) | 1 : 0;
+        f->eip = (uint16_t)(ip + len + 2);
+        return;
+      }
+      if (op2 == 0x21 && (modrm & 0xc0) == 0xc0)
+      {
+        *r = 0;                 /* MOV r32, DRn */
+        f->eip = (uint16_t)(ip + len + 2);
+        return;
+      }
+      if ((op2 == 0x22 || op2 == 0x23) && (modrm & 0xc0) == 0xc0)
+      {
+        /* MOV CRn/DRn, r32: not the program's to set. Cache control and
+           the like in CR0 are ignored; clearing the protected mode bit (a
+           switch to real mode) cannot be done: the program is ended. */
+        if (op2 == 0x22 && n == 0 && !(*r & 1))
+          break;
+        f->eip = (uint16_t)(ip + len + 2);
+        return;
+      }
+      if (op2 == 0x06 || op2 == 0x08 || op2 == 0x09)
+      {
+        f->eip = (uint16_t)(ip + len + 1);      /* CLTS, INVD, WBINVD: nothing */
+        return;
+      }
+      break;
+    }
   }
-  panic_frame(f, "unhandled #GP in V86 mode");
+  /* An instruction a DOS program cannot use under the monitor (a switch
+     to protected mode of its own, ...): the program is ended, as by Ctrl+C,
+     not the machine - unless that does not help. */
+  {
+    static uint32_t last_cs, last_ip, again;
+    if (last_cs == f->cs && last_ip == f->eip && ++again >= 3)
+      panic_frame(f, "unhandled #GP in V86 mode");
+    if (last_cs != f->cs || last_ip != f->eip)
+      again = 0;
+    last_cs = f->cs;
+    last_ip = f->eip;
+    kprintf("v86: a program used an instruction it cannot use here at %04x:%04x (%02x %02x %02x %02x %02x): ended\n",
+            f->cs, ip, fetch8(f, ip), fetch8(f, ip + 1), fetch8(f, ip + 2), fetch8(f, ip + 3), fetch8(f, ip + 4));
+    dpmi_rm_exit();
+    AX(f) = 0x4cff;
+    vm1.vif = 1;
+    v86_reflect(f, 0x21);
+  }
 }
 
 /* ---------------------------------------------------------------- */

@@ -16,6 +16,7 @@
  *   E8000000-EBFFFFFF  UEFI boot disk image (RD_VIRT)
  *   EC000000-EDFFFFFF  device registers (MMIO_VIRT, pci.c)
  *   EE000000-EE3FFFFF  DOS session instance data (vm.c INST_BASE)
+ *   EE800000-EEFFFFFF  DPMI clients that wait for one they started (dpmi.c NEST_AREA)
  *   EFC00000-EFFFFFFF  temporary physical windows (mm.c KMAP_BASE)
  *   F0000000-          the core and its pool (KBASE)
  *   FFC00000-FFFFFFFF  page tables (recursive mapping)
@@ -34,6 +35,7 @@
 #define HCODE_SEL 0x2b          /* ring 3 host code (PM breakpoints)  */
 #define HDATA_SEL 0x33          /* ring 3 host data (host PM stacks)  */
 #define ESPFIX_SEL 0x38         /* ring 0 alias stack for IRET to 16 bit SS */
+#define BDA_SEL   0x40          /* ring 3 data: the BIOS data area (0040h)  */
 
 #define EFL_CF    0x00000001u
 #define EFL_ZF    0x00000040u
@@ -164,6 +166,8 @@ int vm_bios_call(uint8_t vec);
 void vm_bios_done(void);
 int vm_key_wait(const struct frame *f);
 void v86_reflect_bp(struct frame *f, uint8_t vec, int bp);
+void v86_vector_set(int psp, uint8_t vec);
+void v86_vectors_end(int psp, int resident);
 void v86_bp_return(struct frame *f, int hw);
 int vm_has_focus(void);
 uint8_t *vm_focus_bda(void);

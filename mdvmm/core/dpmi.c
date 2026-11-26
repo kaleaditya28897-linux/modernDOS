@@ -92,6 +92,7 @@ static struct client {
   struct block blocks[MAX_BLOCKS];
   struct callback cb[MAX_CALLBACKS];
   uint32_t next_lin, next_phys;
+  uint32_t ivt[256];                    /* the real mode vectors when it started */
   uint32_t lin_base, lin_end;           /* this client's linear memory */
   uint32_t phys_base, phys_end;         /* and its 0800h mappings */
 } cl;
@@ -121,7 +122,7 @@ static uint32_t hstack_pages[MAX_SESSIONS][HSTACK_PAGES];
 static struct saved *nest[MAX_SESSIONS][MAX_NEST];
 static int nest_depth[MAX_SESSIONS];
 #define NEST_PAGES ((sizeof(struct saved) + 4095) / 4096)
-#define NEST_AREA  0xE1000000u          /* their linear addresses */
+#define NEST_AREA  0xEE800000u          /* their linear addresses (core.h) */
 
 static void state_save(struct saved *a)
 {
@@ -487,8 +488,19 @@ static void pm_handler(const struct frame *cur, struct farptr h, int kind,
 
 static void free_blocks(void)
 {
-  uint32_t lin, p;
+  uint32_t lin, p, *ivt = (uint32_t *)0;
   int i;
+
+  /* real mode vectors the client pointed at its callbacks (DOS/4GW leaves
+     some): the callbacks go with the client, the vectors back to what
+     they were when it started */
+  for (i = 0; i < 256; i++)
+    if ((ivt[i] >> 16) == boot.stub_seg && (uint16_t)ivt[i] >= boot.stub_bp + BP_CALLBACK &&
+        (uint16_t)ivt[i] < boot.stub_bp + BP_CALLBACK + MAX_CALLBACKS)
+    {
+      kprintf("dpmi: real mode vector %02x was left on a callback: restored\n", i);
+      ivt[i] = cl.ivt[i];
+    }
 
   for (i = 0; i < MAX_BLOCKS; i++)
   {
@@ -509,6 +521,7 @@ static void __attribute__((noreturn)) client_exit(uint8_t code)
   int i;
 
   kprintf("dpmi: client exit, code %u\n", code);
+  v86_vectors_end(cl.psp, 0);
   if (cl.env_sel)
     *(uint16_t *)rm_ptr(cl.psp, 0x2c) = cl.env_seg;
   free_blocks();
@@ -596,6 +609,7 @@ static void client_enter(struct frame *v)
   cl.rm_ss = (uint16_t)v->es;           /* private data area */
   cl.rm_sp = 0x800;
   cl.rm_ds = (uint16_t)v->ds;
+  memcpy(cl.ivt, (const void *)0, sizeof(cl.ivt));
   rm_ss_cur = cl.rm_ss;
   rm_sp_cur = cl.rm_sp;
   cl.lin_base = lin_base;
@@ -1255,6 +1269,7 @@ void dpmi_irq(struct frame *f, int irq)
 }
 
 static void pm_int(struct frame *f, uint8_t vec);
+static void dpmi_api(struct frame *f);
 
 /* PM breakpoints in the host code page */
 static void host_bp(struct frame *f, uint32_t off)
@@ -1303,6 +1318,24 @@ static void host_bp(struct frame *f, uint32_t off)
   {
     /* client chained to the default handler: reflect, then IRET */
     struct frame v;
+    uint8_t vec = (uint8_t)(off - HBP_DEFINT);
+    if (vec == 0x21 && AH(f) == 0x4c)
+      client_exit(AL(f));
+    if (vec == 0x31)
+    {
+      /* the host's services: on the caller's frame, as if it had called */
+      struct frame r;
+      uint32_t fl;
+      memcpy(&r, f, sizeof(r));
+      r.eip = pm_pop(&r, isize());
+      r.cs = pm_pop(&r, isize()) & 0xffff;
+      fl = pm_pop(&r, isize());
+      if (!cl.bits32)
+        fl = (r.eflags & 0xffff0000u) | (fl & 0xffff);
+      r.eflags = pm_flags(fl);
+      dpmi_api(&r);
+      enter_frame(&r);
+    }
     rm_setup(&v, f);
     rm_int(&v, (uint8_t)(off - HBP_DEFINT), f->eflags);
     rm_go(&v, f, T_PM_DEFINT, 0, 0, 0);
@@ -1322,10 +1355,10 @@ static void pm_int(struct frame *f, uint8_t vec)
 {
   struct frame v;
 
-  if (vec == 0x31)
-    return dpmi_api(f);
-  if (vec == 0x21 && AH(f) == 0x4c)
-    client_exit(AL(f));
+  /* the client's own handler first, also for INT 31h and for INT 21h
+     AH=4Ch: DOS extenders that run as a client hook both - CauseWay adds
+     its services to INT 31h, DOS/4GW cleans up in its INT 21h handler
+     before the program ends. They chain to the host (host_bp). */
   if (cl.pmint[vec].sel)
   {
     pm_push(f, f->eflags, isize());
@@ -1336,6 +1369,10 @@ static void pm_int(struct frame *f, uint8_t vec)
     f->eip = cl.pmint[vec].off;
     return;
   }
+  if (vec == 0x31)
+    return dpmi_api(f);
+  if (vec == 0x21 && AH(f) == 0x4c)
+    client_exit(AL(f));
   rm_setup(&v, f);
   rm_int(&v, vec, f->eflags);
   rm_go(&v, f, T_PM_INT, 0, 0, 0);
@@ -1555,6 +1592,7 @@ static void dpmi_api(struct frame *f)
     case 0x0201:                        /* set real mode vector */
     {
       uint16_t *vec = rm_ptr(0, n * 4u);
+      v86_vector_set(cl.psp, (uint8_t)n);
       vec[0] = DX(f);
       vec[1] = CX(f);
       return;
@@ -1699,5 +1737,10 @@ void dpmi_init(void)
       panic("dpmi: no memory");
   gdt_set(HCODE_SEL >> 3, HOST_AREA, 0xfff, 0xfa, 0x40);
   gdt_set(HDATA_SEL >> 3, HOST_AREA, HOST_STACK - 1, 0xf2, 0x40);
+  /* selector 0040h: the BIOS data area, as real mode segment 0040h is.
+     DOS programs moved to protected mode count on it (DOS/4GW reads the
+     timer ticks through it; without it, it divided by nonsense - only at
+     times, so only some programs failed) */
+  gdt_set(BDA_SEL >> 3, 0x400, 0xffff, 0xf2, 0x00);
   ldt_load(ldt, LDT_ENTRIES);
 }
