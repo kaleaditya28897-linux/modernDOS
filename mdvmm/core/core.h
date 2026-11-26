@@ -160,6 +160,17 @@ int vm_port60_waiting(void);
 void vm_kbd_done(void);                 /* a session's keyboard handler returned */
 void vm_kbd_next(struct frame *f);      /* give the session its next keystroke */
 uint32_t vm_ticks(void);                /* timer ticks since the start */
+/* vga.c: VGA mode 13h on the UEFI framebuffer (stubs on DOS boots) */
+void bios_program_end(void);
+int vga_active(void);
+int vga_enter(int keep);
+void vga_leave(void);
+void vga_tick(void);
+int vga_port_in(uint16_t port, int size, uint32_t *v);
+int vga_port_out(uint16_t port, int size, uint32_t v);
+int vga_debug(struct frame *f, const uint8_t *code, const uint8_t *esi_byte);
+int vga_int10(struct frame *f);
+int dpmi_vga_debug(struct frame *f);
 int vm_vga_blocked(void);
 int vm_video_int(struct frame *f);
 int vm_bios_call(uint8_t vec);

@@ -31,6 +31,8 @@ for ext in dos4g pmodew dos32a causeway; do
   wcl386 -q -bt=dos -l=$ext -fe=h_$ext.exe hello.c > w_$ext.log 2>&1 || { cat w_$ext.log; exit 1; }
 done
 mv h_causeway.exe h_causew.exe
+wcl -q -bt=dos -ml -fe=vga16.exe "$HERE/vga.c" > v16.log 2>&1 || { cat v16.log; exit 1; }
+wcl386 -q -bt=dos -l=dos4g -fe=vga32.exe "$HERE/vga.c" > v32.log 2>&1 || { cat v32.log; exit 1; }
 
 printf 'DEVICE=A:\\HIMEMX.EXE\r\nDOS=HIGH\r\nSHELL=A:\\COMMAND.COM A:\\ /E:1024 /P\r\n' > fdconfig.sys
 printf '%s\r\n' '@ECHO OFF' 'SET WATCOM=A:\W' 'SET INCLUDE=A:\W\H' 'PATH A:\;A:\W\BINW' \
@@ -41,6 +43,8 @@ printf '%s\r\n' '@ECHO OFF' 'SET WATCOM=A:\W' 'SET INCLUDE=A:\W\H' 'PATH A:\;A:\
   'ECHO === compiled here' 'COPY HELLO.C MADE.C >NUL' 'WCL386 -q -bt=dos -l=dos4g MADE.C' 'MADE.EXE' \
   'ECHO === DOS/32A' 'H_DOS32A.EXE' \
   'ECHO === CauseWay' 'H_CAUSEW.EXE' \
+  'ECHO === VGA 16' 'VGA16.EXE' \
+  'ECHO === VGA 32' 'VGA32.EXE' \
   'ECHO === end' 'A:\POWEROFF.COM' > autoexec.bat
 "$NASM" "$TEST/ldosboot/boot.asm" -w-user -I"$TEST/lmacros/" \
   -D_COMPAT_FREEDOS=1 -D_LBA=0 -D_USE_PART_INFO=0 -D_QUERY_GEOMETRY=0 \
@@ -52,7 +56,7 @@ printf '%s\r\n' '@ECHO OFF' 'SET WATCOM=A:\W' 'SET INCLUDE=A:\W\H' 'PATH A:\;A:\
   -D_MBR_PART_TYPE=ptFAT12 -D_BPE=12 -D_SPC=8 -D_SPI=16380 \
   -D_SPF=6 -D_NUMROOT=224 -D_CHS_SECTORS=63 -D_CHS_HEADS=2 -D_UNIT=00h -o boot.img
 for f in /opt/fdos/bin/command.com /opt/fdos/bin/himemx.exe autoexec.bat poweroff.com \
-         hello16.exe h_dos4g.exe h_pmodew.exe h_dos32a.exe h_causew.exe hello.c \
+         hello16.exe h_dos4g.exe h_pmodew.exe h_dos32a.exe h_causew.exe hello.c vga16.exe vga32.exe \
          $WATCOM/binw/dos4gw.exe $WATCOM/binw/pmodew.exe $WATCOM/binw/dos32a.exe; do
   mcopy -i boot.img "$f" "::$(basename "$f" | tr a-z A-Z)"
 done
@@ -72,18 +76,28 @@ mcopy -i esp.img "$ROOT/mdvmm/build/BOOTX64.EFI" ::/EFI/BOOT/BOOTX64.EFI
 mcopy -i esp.img boot.img ::/MDOS/BOOT.IMG
 
 echo "== booting"
+python3 "$HERE/vgawatch.py" debug.log mon.sock "$WORK/vga" &
+WATCH=$!
 timeout --foreground 300 qemu-system-x86_64 -m 256 -bios "$OVMF" -display none \
   -drive file=esp.img,format=raw,if=ide -nic user,model=e1000 \
-  -debugcon file:debug.log -serial file:serial.log -no-reboot </dev/null || true
+  -debugcon file:debug.log -serial file:serial.log -monitor unix:mon.sock,server,nowait \
+  -no-reboot </dev/null || true
+kill $WATCH 2>/dev/null || true
 sed 's/\r//g; s/\x1b\[[0-9;]*[A-Za-z]//g' serial.log | tr -d '\000' | grep -av '^$' > screen.txt
 sed -n '/^=== real mode/,$p' screen.txt | grep -av "^  ok " | head -60 | sed 's/^/   /'
-grep -a "^v86: a program\|PANIC" -A6 debug.log | head -12 | sed "s/^/   monitor: /" || true
+grep -a "^v86: a program\|^vga: \|PANIC" -A6 debug.log | head -12 | sed "s/^/   monitor: /" || true
 
 fail=0
 section() { sed -n "/^=== $1 *\$/,/^=== [^ ]* *[^ ]* *\$/p" screen.txt; }
 for kind in "real mode" "DOS\\/4GW" "PMODE\\/W" "DOS\\/4GW again" "compiled here" "DOS\\/32A" "CauseWay"; do
   name=$(echo "$kind" | tr -d '\\')
   if section "$kind" | grep -aq "hello: all 5 ok"; then echo "  ok   UEFI: $name"; else echo "  FAIL UEFI: $name"; fail=1; fi
+done
+for bits in 16 32; do
+  if section "VGA $bits" | grep -aq "vga: $bits bit, mode 13h, palette 63/0/0: all ok" &&
+     python3 "$HERE/vgacheck.py" vga$bits.ppm; then
+    echo "  ok   UEFI: VGA mode 13h, $bits bit: palette, pixels, the picture on the framebuffer"
+  else echo "  FAIL UEFI: VGA mode 13h, $bits bit"; fail=1; fi
 done
 grep -aq "^=== end" screen.txt && echo "  ok   UEFI: ran to the end" || { echo "  FAIL UEFI: did not run to the end"; fail=1; }
 if [ $fail = 0 ]; then echo "COMPAT UEFI TEST: success"; exit 0; else echo "COMPAT UEFI TEST: failure"; exit 1; fi

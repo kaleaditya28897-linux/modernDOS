@@ -294,7 +294,10 @@ static int intercept(struct frame *f, uint8_t vec)
   if (vec == 0x21 && AH(f) == 0x25)
     v86_vector_set(dos_current_psp(), AL(f));
   else if ((vec == 0x21 && (AH(f) == 0x4c || AH(f) == 0x00)) || vec == 0x20)
+  {
     v86_vectors_end(dos_current_psp(), 0);
+    bios_program_end();
+  }
   else if ((vec == 0x21 && AH(f) == 0x31) || vec == 0x27)
     v86_vectors_end(dos_current_psp(), 1);
 
@@ -373,6 +376,8 @@ static uint32_t io_in(uint16_t port, int size)
     return dma_in(port);
   if (port == 0x60 && size == 1 && vm_port60(&b))
     return b;                   /* keystroke replayed by the session code */
+  if (vga_port_in(port, size, &v))
+    return v;                   /* the monitor's VGA (mode 13h on a UEFI boot) */
   v = size == 1 ? inb(port) : size == 2 ? inw(port) : inl(port);
 
   /* a scancode the monitor has taken from the keyboard controller waits
@@ -395,6 +400,8 @@ static void io_out(uint16_t port, int size, uint32_t v)
   }
   if (port >= 0x3b0 && port <= 0x3df && vm_vga_blocked())
     return;                     /* not on the display: the hardware is not its */
+  if (vga_port_out(port, size, v))
+    return;
   switch (port)
   {
     case 0x92:

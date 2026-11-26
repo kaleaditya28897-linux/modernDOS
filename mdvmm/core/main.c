@@ -39,6 +39,8 @@ void trap_dispatch(struct frame *f)
   }
   if (user)
   {
+    if (f->vector == 1 && dpmi_vga_debug(f))
+      return;                   /* an I/O breakpoint of the monitor's VGA */
     dpmi_trap(f);
     return;
   }

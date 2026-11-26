@@ -291,7 +291,10 @@ BIOS does, and loads the kernel.
 - A20 is always enabled (programs relying on 1 MB wraparound need LOADFIX).
 - UEFI boot: the boot floppy is a RAM copy of the image (writes are
   lost; hard disks are real); USB keyboards only on root ports (no
-  hubs, no hotplug), no USB mice; text mode only; the framebuffer must be below 4 GB
+  hubs, no hotplug), no USB mice; of the VGA modes text and mode 13h (320x200, 256
+  colours: `core/vga.c` - the monitor is the display card, the picture is
+  drawn enlarged on the framebuffer; DPMI clients' palette port access is
+  caught with I/O breakpoints), no planar modes; the framebuffer must be below 4 GB
   and 32 bpp RGB/BGR; no ISA DMA (no bounce buffer below 16 MB).
 - Sessions: graphics modes are not virtualized (a session that is not on
   the display waits when it sets one; a DPMI client's mode set through

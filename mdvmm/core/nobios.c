@@ -47,3 +47,37 @@ uint32_t fbcon_log_copy(char *dst, uint32_t room, uint32_t lines)
   (void)lines;
   return 0;                             /* the log is not kept on DOS boots */
 }
+
+/* VGA mode 13h: the machine's video BIOS and card do that */
+int vga_active(void)
+{
+  return 0;
+}
+
+int vga_port_in(uint16_t port, int size, uint32_t *v)
+{
+  (void)port;
+  (void)size;
+  (void)v;
+  return 0;
+}
+
+int vga_port_out(uint16_t port, int size, uint32_t v)
+{
+  (void)port;
+  (void)size;
+  (void)v;
+  return 0;
+}
+
+int vga_debug(struct frame *f, const uint8_t *code, const uint8_t *esi_byte)
+{
+  (void)f;
+  (void)code;
+  (void)esi_byte;
+  return 0;
+}
+
+void bios_program_end(void)
+{
+}

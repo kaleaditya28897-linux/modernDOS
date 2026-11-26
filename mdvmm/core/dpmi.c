@@ -1135,6 +1135,15 @@ void dpmi_v86_bp(struct frame *v, int bp)
 /* ---------------------------------------------------------------- */
 /* interrupts and exceptions from the client                        */
 
+/* a debug exception in the client: the monitor's VGA port breakpoints? */
+int dpmi_vga_debug(struct frame *f)
+{
+  const uint8_t *code = pm_ptr(f->cs, sel_big(f->cs) ? f->eip : (f->eip & 0xffff));
+  uint32_t esi = sel_big(f->pds) ? f->esi : (f->esi & 0xffff);
+
+  return vga_debug(f, code, pm_ptr(f->pds, esi - 1));
+}
+
 int dpmi_active(void)
 {
   return cl.active;

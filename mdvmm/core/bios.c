@@ -301,6 +301,17 @@ static void graphics(int on)
   fbcon_graphics(on);
 }
 
+/* a program ends: if it left the display in mode 13h, text mode again (the
+   prompt would not show) */
+void bios_program_end(void)
+{
+  if (!vga_active() || !vm_has_focus())
+    return;
+  vga_leave();
+  set_mode(3);
+  graphics(0);
+}
+
 static void vbe(struct frame *f)
 {
   uint16_t mode;
@@ -321,6 +332,7 @@ static void vbe(struct frame *f)
       break;
     case 0x02:
       mode = BX(f) & 0x1ff;
+      vga_leave();
       if (mode == VBE_MODE)
       {
         graphics(1);
@@ -366,11 +378,30 @@ static void int10(struct frame *f)
 {
   int page = BH(f) & 7, row, col, i;
 
+  if (AH(f) != 0x00 && AH(f) != 0x0f && AH(f) != 0x4f && vga_int10(f))
+    return;
   switch (AH(f))
   {
     case 0x00:
+      if ((AL(f) & 0x7f) == 0x13 && vm_has_focus() && vga_enter(AL(f) & 0x80))
+      {
+        /* 320x200, 256 colours: the monitor is the display card (vga.c) */
+        graphics(1);
+        BDA8(0x49) = 0x13;
+        BDA16(0x4a) = 40;
+        BDA16(0x4c) = 0x2000;
+        BDA16(0x4e) = 0;
+        BDA8(0x62) = 0;
+        BDA8(0x84) = 24;
+        BDA16(0x85) = 8;
+        for (i = 0; i < 8; i++)
+          BDA16(0x50 + i * 2) = 0;
+        AL(f) = 0x20;
+        break;
+      }
+      vga_leave();
       set_mode(AL(f));
-      graphics(0);                      /* text mode only */
+      graphics(0);
       AL(f) = 0x30;
       break;
     case 0x01:
@@ -1253,6 +1284,7 @@ int bios_bp(struct frame *f, uint16_t ip)
     }
     usbkbd_tick();
     fbcon_update();
+    vga_tick();
     f->eip++;
     return 1;
   }

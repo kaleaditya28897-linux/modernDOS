@@ -42,7 +42,10 @@ wcl -q -bt=dos -ml -fe=hello16.exe hello.c > w16.log 2>&1 || { cat w16.log; exit
 for ext in dos4g pmodew dos32a causeway; do
   wcl386 -q -bt=dos -l=$ext -fe=h_$ext.exe hello.c > w_$ext.log 2>&1 || { cat w_$ext.log; exit 1; }
 done
-ls -l hello16.exe h_*.exe | awk '{print "   " $5, $9}'
+# VGA mode 13h, in real mode and under DOS/4GW
+wcl -q -bt=dos -ml -fe=vga16.exe "$HERE/vga.c" > v16.log 2>&1 || { cat v16.log; exit 1; }
+wcl386 -q -bt=dos -l=dos4g -fe=vga32.exe "$HERE/vga.c" > v32.log 2>&1 || { cat v32.log; exit 1; }
+ls -l hello16.exe h_*.exe vga*.exe | awk '{print "   " $5, $9}'
 
 # the DOS-hosted compiler: what WCL386 needs to compile and link for DOS/4GW
 mmd -i disk.img@@$PART ::/WATCOM ::/WATCOM/BINW ::/WATCOM/H ::/WATCOM/LIB386 ::/WATCOM/LIB386/DOS ::/T
@@ -55,7 +58,8 @@ done
 mcopy -i disk.img@@$PART $WATCOM/lib386/dos/clib3r.lib $WATCOM/lib386/dos/emu387.lib ::/WATCOM/LIB386/DOS/
 mcopy -i disk.img@@$PART $WATCOM/lib386/math387r.lib ::/WATCOM/LIB386/
 mcopy -i disk.img@@$PART $WATCOM/binw/dos4gw.exe $WATCOM/binw/pmodew.exe $WATCOM/binw/dos32a.exe ::/T/
-mcopy -i disk.img@@$PART hello16.exe h_dos4g.exe h_pmodew.exe h_dos32a.exe h_causeway.exe hello.c poweroff.com ::/T/
+mcopy -i disk.img@@$PART hello16.exe h_dos4g.exe h_pmodew.exe h_dos32a.exe h_causeway.exe hello.c poweroff.com \
+  vga16.exe vga32.exe ::/T/
 
 # AUTOEXEC.BAT: the edition's own, then the programs
 mtype -i disk.img@@$PART ::AUTOEXEC.BAT > autoexec.bat
@@ -69,6 +73,8 @@ printf '%s\r\n' 'SET WATCOM=C:\WATCOM' 'SET INCLUDE=C:\WATCOM\H' 'PATH C:\MDOS;C
   'WCL386 -q -bt=dos -l=dos4g MADE.C >C:\WCL.TXT' 'MADE.EXE >>C:\OUT.TXT' \
   'ECHO === DOS/32A >>C:\OUT.TXT' 'H_DOS32A.EXE >>C:\OUT.TXT' \
   'ECHO === CauseWay >>C:\OUT.TXT' 'H_CAUSEW.EXE >>C:\OUT.TXT' \
+  'ECHO === VGA 16 >>C:\OUT.TXT' 'VGA16.EXE >>C:\OUT.TXT' \
+  'ECHO === VGA 32 >>C:\OUT.TXT' 'VGA32.EXE >>C:\OUT.TXT' \
   'ECHO === end >>C:\OUT.TXT' 'POWEROFF.COM' >> autoexec.bat
 mdel -i disk.img@@$PART ::AUTOEXEC.BAT
 mcopy -i disk.img@@$PART autoexec.bat ::AUTOEXEC.BAT
@@ -78,6 +84,7 @@ echo "== booting"
 qemu-system-i386 -m 128 -display none -drive file=disk.img,format=raw,if=ide \
   -nic user,model=e1000 -debugcon file:debug.log -no-reboot -monitor unix:mon.sock,server,nowait </dev/null &
 QPID=$!
+python3 "$HERE/vgawatch.py" debug.log mon.sock "$WORK/vga" &
 for i in $(seq 1 ${COMPAT_TIME:-300}); do kill -0 $QPID 2>/dev/null || break; sleep 1; done
 if kill -0 $QPID 2>/dev/null; then    # still there: what is on its screen?
   python3 -c 'import socket,sys,time; s=socket.socket(socket.AF_UNIX); s.connect("mon.sock"); s.sendall(("screendump %s\n" % sys.argv[1]).encode()); time.sleep(1)' \
@@ -102,6 +109,12 @@ section() { sed -n "/^=== $1 *\$/,/^=== [^ ]* *[^ ]* *\$/p" out.txt; }
 for kind in "real mode" "DOS\\/4GW" "PMODE\\/W" "DOS\\/4GW again" "compiled here" "DOS\\/32A" "CauseWay"; do
   name=$(echo "$kind" | tr -d '\\')
   if section "$kind" | grep -q "hello: all 5 ok"; then echo "  ok   $name"; else echo "  FAIL $name"; fail=1; fi
+done
+for bits in 16 32; do
+  if section "VGA $bits" | grep -q "vga: $bits bit, mode 13h, palette 63/0/0: all ok" &&
+     python3 "$HERE/vgacheck.py" vga$bits.ppm; then
+    echo "  ok   VGA mode 13h, $bits bit: palette, pixels, the picture on the display"
+  else echo "  FAIL VGA mode 13h, $bits bit"; fail=1; fi
 done
 grep -q "^=== end" out.txt && echo "  ok   ran to the end" || { echo "  FAIL did not run to the end"; fail=1; }
 if [ $fail = 0 ]; then echo "COMPAT TEST: success"; exit 0; else echo "COMPAT TEST: failure"; exit 1; fi
