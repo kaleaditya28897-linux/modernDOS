@@ -317,6 +317,7 @@ void nic_api(struct frame *f)
     case 0x13:
       if (n->debug)
         n->debug(n);
+      vm_debug();                       /* and where the sessions are */
       set_cf(f, 0);
       return;
   }

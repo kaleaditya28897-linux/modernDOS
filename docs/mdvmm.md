@@ -151,6 +151,10 @@ programs started by a real mode driver). What they needed from the host:
 - Real mode vectors a program leaves pointing into its own memory when it
   ends are put back to what they were before the program set them.
 
+`tests/compat/game.sh` plays the start of a game off the shelf
+(Kiloblaster, 1992: real mode, its own keyboard and timer handlers, mode
+X) on both editions and compares the pictures.
+
 ## DOS sessions
 
 All sessions share one DOS kernel, as in Windows 386 enhanced mode.
@@ -291,10 +295,13 @@ BIOS does, and loads the kernel.
 - A20 is always enabled (programs relying on 1 MB wraparound need LOADFIX).
 - UEFI boot: the boot floppy is a RAM copy of the image (writes are
   lost; hard disks are real); USB keyboards only on root ports (no
-  hubs, no hotplug), no USB mice; of the VGA modes text and mode 13h (320x200, 256
-  colours: `core/vga.c` - the monitor is the display card, the picture is
-  drawn enlarged on the framebuffer; DPMI clients' palette port access is
-  caught with I/O breakpoints), no planar modes; the framebuffer must be below 4 GB
+  hubs, no hotplug), no USB mice; of the VGA modes text, mode 13h (320x200, 256
+  colours) and its unchained relatives ("mode X": four planes, page
+  flipping, 320x240) - `core/vga.c`: the monitor is the display card, the
+  picture is drawn enlarged on the framebuffer; a DPMI client's access to
+  the card's ports is caught with I/O breakpoints; in the planar modes
+  A0000h is unmapped and `core/vgaemu.c` runs the instructions that touch
+  it. Not the 16 colour planar modes; the framebuffer must be below 4 GB
   and 32 bpp RGB/BGR; no ISA DMA (no bounce buffer below 16 MB).
 - Sessions: graphics modes are not virtualized (a session that is not on
   the display waits when it sets one; a DPMI client's mode set through

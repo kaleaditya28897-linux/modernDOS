@@ -70,11 +70,21 @@ int vga_port_out(uint16_t port, int size, uint32_t v)
   return 0;
 }
 
-int vga_debug(struct frame *f, const uint8_t *code, const uint8_t *esi_byte)
+int vga_debug(struct frame *f, const uint8_t *code, const uint8_t *esi_byte, int code32)
 {
   (void)f;
   (void)code;
   (void)esi_byte;
+  (void)code32;
+  return 0;
+}
+
+int vga_fault(struct frame *f, uint32_t addr, int v86, int code32)
+{
+  (void)f;
+  (void)addr;
+  (void)v86;
+  (void)code32;
   return 0;
 }
 

@@ -44,7 +44,21 @@ dos() { timeout 90 ssh "${OPTS[@]}" dos@127.0.0.1 "$@" 2>&1 | tr -d '\r'; }
 dosgrep() {   # dosgrep "what" "pattern" command
   local what=$1 pat=$2; shift 2
   dos "$@" > out.txt || true
-  if grep -aq "$pat" out.txt; then ok "$what"; else bad "$what"; sed 's/^/       /' out.txt | head -8; fi
+  if grep -aq "$pat" out.txt; then ok "$what"; else bad "$what"; sed 's/^/       /' out.txt | head -8; snapshot; fi
+}
+snapshot() {   # what the machine shows and where its CPU is, for a failure
+  python3 - "$ROOT/_output/bios-fail" <<'PY' 2>/dev/null || true
+import socket, sys, time
+s = socket.socket(socket.AF_UNIX); s.connect("mon.sock"); time.sleep(0.3); s.recv(65536)
+s.sendall(("screendump %s.ppm\n" % sys.argv[1]).encode()); time.sleep(1); s.recv(65536)
+for i in range(5):
+    s.sendall(b"info registers\n"); time.sleep(0.5)
+    d = s.recv(65536).decode("latin1")
+    print("       cpu: " + " ".join(x for x in d.split() if x.startswith(("EIP=", "EFL=", "ESP=", "EAX=", "CR0="))) +
+          " | " + " ; ".join(l[:14] for l in d.split("\n") if l.startswith(("CS ", "SS "))))
+PY
+  timeout 30 ssh "${OPTS[@]}" dos@127.0.0.1 'MDLOG /N' > /dev/null 2>&1 || true    # the sessions' state to the log
+  grep -a "PANIC\|^kbd: \|^v86: a program\|vm: session\|^vm:   screen" -A5 debug.log | tail -30 | sed 's/^/       monitor: /'
 }
 boot() {   # boot name qemu-args...: wait for the SSH server
   local name=$1 i; shift

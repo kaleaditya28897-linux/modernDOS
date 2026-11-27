@@ -336,6 +336,47 @@ void vm_tick_done(void)
   ses[cur].tick_busy = 0;
 }
 
+/* where every session is (MDLOG /N): for a look at one that does not go on */
+void vm_debug(void)
+{
+  int n;
+
+  for (n = 0; n < MAX_SESSIONS; n++)
+  {
+    struct session *s = &ses[n];
+    const uint8_t *b;
+    if (!s->used)
+      continue;
+    b = bda(n);
+    if (n == cur)
+      kprintf("vm: session %d runs (asking); focus %d, in DOS %04x, crit %u\n", n, focus,
+              indos_lin ? *(const uint16_t *)(indos_lin - 1 + 0x10) : 0, crit);
+    else
+      kprintf("vm: session %d at %04x:%04x %s ss:sp %04x:%04x if %u, job %d, in BIOS %d, kbd busy %d, "
+              "tick busy %d, owed %u, crit %u, keys %u\n", n, s->f.cs, (uint16_t)s->f.eip,
+              (s->f.eflags & EFL_VM) ? "v86" : "pm", (s->f.eflags & EFL_VM) ? s->f.ss : 0,
+              (s->f.eflags & EFL_VM) ? (uint16_t)s->f.esp : 0, s->vif, s->job, s->inbios, s->kbd_busy,
+              s->tick_busy, s->owed, s->crit,
+              (unsigned)((*(const uint16_t *)(b + 0x1c) - *(const uint16_t *)(b + 0x1a)) & 0x1f) / 2);
+    if (n != cur && n != focus && s->vram[0])
+    {
+      /* the last lines of its text screen (to the cursor) */
+      int row = b[0x51], r, c;
+      for (r = row > 3 ? row - 3 : 0; r <= row && r < 25; r++)
+      {
+        char line[81];
+        const uint8_t *cells = (const uint8_t *)kmap(2, s->vram[(r * 160) >> 12]) + ((r * 160) & 4095);
+        for (c = 0; c < 80 && ((r * 160) & 4095) + c * 2 < 4096; c++)
+          line[c] = (char)(cells[c * 2] >= ' ' && cells[c * 2] < 127 ? cells[c * 2] : ' ');
+        while (c > 0 && line[c - 1] == ' ')
+          c--;
+        line[c] = 0;
+        kprintf("vm:   screen %2d| %s\n", r, line);
+      }
+    }
+  }
+}
+
 uint32_t vm_ticks(void)
 {
   return tnow();

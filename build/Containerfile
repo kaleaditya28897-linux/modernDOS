@@ -65,4 +65,9 @@ RUN cd /opt/fdos \
       curl -fsSL -o $p.zip https://www.ibiblio.org/pub/micro/pc-stuff/freedos/files/repositories/1.4/base/$p.zip \
       && unzip -q -o -LL $p.zip && rm $p.zip; done
 
+# a DOS game for the compatibility tests -> /opt/games (pinned, checked;
+# see games.sh)
+COPY games.sh /tmp/
+RUN bash /tmp/games.sh && rm /tmp/games.sh
+
 WORKDIR /src

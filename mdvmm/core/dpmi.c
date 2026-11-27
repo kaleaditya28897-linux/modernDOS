@@ -1143,7 +1143,18 @@ int dpmi_vga_debug(struct frame *f)
   const uint8_t *code = pm_ptr(f->cs, sel_big(f->cs) ? f->eip : (f->eip & 0xffff));
   uint32_t esi = sel_big(f->pds) ? f->esi : (f->esi & 0xffff);
 
-  return vga_debug(f, code, pm_ptr(f->pds, esi - 1));
+  return vga_debug(f, code, pm_ptr(f->pds, esi - 1), sel_big(f->cs));
+}
+
+uint32_t dpmi_sel_base(uint16_t sel)
+{
+  return sel_base(sel);
+}
+
+/* a page fault in the client: on the monitor's VGA memory? */
+int dpmi_vga_fault(struct frame *f, uint32_t addr)
+{
+  return vga_fault(f, addr, 0, sel_big(f->cs));
 }
 
 int dpmi_active(void)

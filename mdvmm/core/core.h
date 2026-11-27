@@ -17,6 +17,7 @@
  *   EC000000-EDFFFFFF  device registers (MMIO_VIRT, pci.c)
  *   EE000000-EE3FFFFF  DOS session instance data (vm.c INST_BASE)
  *   EE800000-EEFFFFFF  DPMI clients that wait for one they started (dpmi.c NEST_AREA)
+ *   EF000000-EF03FFFF  the planes of the monitor's VGA (vga.c PLANES_VIRT)
  *   EFC00000-EFFFFFFF  temporary physical windows (mm.c KMAP_BASE)
  *   F0000000-          the core and its pool (KBASE)
  *   FFC00000-FFFFFFFF  page tables (recursive mapping)
@@ -160,6 +161,7 @@ int vm_port60_waiting(void);
 int vm_kbd_owned(void);
 void vm_kbd_done(void);                 /* a session's keyboard handler returned */
 void vm_kbd_next(struct frame *f);      /* give the session its next keystroke */
+void vm_debug(void);                    /* the sessions' state to the log */
 int vm_owed_tick(void);
 void vm_tick_done(void);
 uint32_t vm_ticks(void);                /* timer ticks since the start */
@@ -171,7 +173,13 @@ void vga_leave(void);
 void vga_tick(void);
 int vga_port_in(uint16_t port, int size, uint32_t *v);
 int vga_port_out(uint16_t port, int size, uint32_t v);
-int vga_debug(struct frame *f, const uint8_t *code, const uint8_t *esi_byte);
+int vga_debug(struct frame *f, const uint8_t *code, const uint8_t *esi_byte, int code32);
+int vga_fault(struct frame *f, uint32_t addr, int v86, int code32);
+uint8_t vga_mem_read(uint32_t off);
+void vga_mem_write(uint32_t off, uint8_t v);
+int vgaemu(struct frame *f, int v86, int code32);
+uint32_t dpmi_sel_base(uint16_t sel);
+int dpmi_vga_fault(struct frame *f, uint32_t addr);
 int vga_int10(struct frame *f);
 int dpmi_vga_debug(struct frame *f);
 int vm_vga_blocked(void);

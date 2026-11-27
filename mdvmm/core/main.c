@@ -32,6 +32,15 @@ void trap_dispatch(struct frame *f)
       v86_irq(f, (int)f->vector - 0x20);
     return;
   }
+  if (f->vector == 14 && ((f->eflags & EFL_VM) || user))
+  {
+    /* a page fault on the monitor's VGA memory (planar modes): the
+       instruction is run by the monitor */
+    uint32_t cr2;
+    __asm__("mov %%cr2, %0" : "=r"(cr2));
+    if ((f->eflags & EFL_VM) ? vga_fault(f, cr2, 1, 0) : dpmi_vga_fault(f, cr2))
+      return;
+  }
   if (f->eflags & EFL_VM)
   {
     v86_exception(f);
