@@ -972,6 +972,8 @@ static void rm_return(struct frame *v)
     case T_PM_IRQ:
       if (t->b == 2)
         vm_kbd_done();                  /* the keyboard interrupt's handler is through */
+      if (t->b == 1)
+        vm_tick_done();                 /* ... the timer's */
       break;
     case T_PM_CALL:
     {
@@ -1223,6 +1225,8 @@ int dpmi_take_pending(struct frame *pm)
 {
   int irq;
 
+  if ((pm->eflags & EFL_IF) && !vm1.pending && vm_owed_tick())
+    vm1.pending |= 1;                   /* a tick it missed: marked done at its return */
   for (irq = 0; irq < 16; irq++)
     if (vm1.pending & (1u << irq))
     {
@@ -1294,6 +1298,8 @@ static void host_bp(struct frame *f, uint32_t off)
       panic("dpmi: bad handler return (kind %d)", t->kind);
     if (!(t->f.eflags & EFL_VM))
       sanitize_sregs(&t->f);
+    if (t->b == 1)
+      vm_tick_done();
     if (t->b == 2)
     {
       vm_kbd_done();

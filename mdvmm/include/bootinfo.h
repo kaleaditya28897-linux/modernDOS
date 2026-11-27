@@ -15,7 +15,8 @@
 #define BP_CALLBACK    3        /* 16 real mode callbacks */
 #define BP_INT13       19       /* a V86 INT 13h call returned */
 #define BP_KBD         20       /* a session's keyboard interrupt handler returned */
-#define BP_COUNT       21
+#define BP_TICK        21       /* a session's handler of a timer tick it was owed returned */
+#define BP_COUNT       22
 #define BOOTINFO_VERSION 5
 
 #define BOOT_DOS   0        /* started from DOS: real BIOS, DOS running */

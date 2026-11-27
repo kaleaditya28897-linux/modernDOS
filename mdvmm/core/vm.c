@@ -20,7 +20,7 @@
 
 #define MAX_RANGES    8
 #define SLICE_TICKS   2                 /* ~110 ms per time slice */
-#define KQ_SIZE       32
+#define KQ_SIZE       128
 #define VRAM          0xB8000u
 #define INST_BASE     0xEE000000u       /* instance data copies, 1MB each */
 
@@ -34,6 +34,9 @@ struct session {
   uint32_t vram[VRAM_PAGES];            /* shadow video pages */
   uint32_t inst;                        /* linear address of instance copy */
   uint32_t tick_mark;
+  uint32_t owed;                        /* timer ticks it missed and still gets */
+  int tick_busy;                        /* the handler of one of those runs */
+  uint32_t tick_since;
   uint8_t kq[KQ_SIZE];                  /* queued scancodes */
   int kq_head, kq_tail;
   int slot;                             /* a job slot (SSHSLOT.COM) */
@@ -74,13 +77,29 @@ static int flat;
 static int registered;
 static int cur, focus, nsessions = 1;
 static int want = -1;                   /* session to switch to */
-static uint32_t ticks, slice;
+static uint32_t ticks;                  /* timer interrupts */
+static uint32_t slice_start;            /* when the running session got the CPU (ms) */
+
+/* The time in units of a normal timer tick (55 ms), for the monitor's own
+   timeouts and time slices. Not the count of timer interrupts: programs
+   set the timer to many times its normal rate (games, for sound and
+   timing), and a session switch at every other interrupt then took most
+   of the machine's time. From the time stamp counter (ipxenic.c); the
+   interrupt count where that is not calibrated. */
+unsigned long mdvmm_ms(void);
+static uint32_t tnow(void)
+{
+  uint32_t ms = (uint32_t)mdvmm_ms();
+
+  return ms ? ms / 55 : ticks;
+}
 static uint32_t crit;                   /* critical section depth */
 static int kbd_ctrl, kbd_alt;
 static int vm_trace;                    /* log every session switch */
 static int latch_valid;                 /* port 60h replay */
 static uint8_t latch;
 static uint32_t latch_tick;             /* when it was set */
+static uint8_t last_scancode;           /* the last one a session read */
 
 
 /* ---------------------------------------------------------------- */
@@ -279,8 +298,11 @@ static uint16_t pic_isr(void)
    byte (a mouse byte). */
 static int latch_ok(void)
 {
-  if (latch_valid && ticks - latch_tick > 2)
+  if (latch_valid && tnow() - latch_tick > 2)
+  {
+    kprintf("kbd: scancode %02x was not read by the session's handler\n", latch);
     latch_valid = 0;
+  }
   return latch_valid;
 }
 
@@ -289,9 +311,34 @@ int vm_current(void)
   return cur;
 }
 
+/* A timer tick the running session missed (switch_to) is due: 1 if it
+   can be given now - none pending, no interrupt in service, the handler
+   of the one before has returned (vm_tick_done). The caller then runs the
+   session's timer interrupt handler. Until that returns the session is
+   not switched out, as with a real interrupt in service: a BIOS runs its
+   handlers on one stack of its own. */
+int vm_owed_tick(void)
+{
+  struct session *s = &ses[cur];
+
+  if (s->tick_busy && tnow() - s->tick_since > 9)
+    s->tick_busy = 0;
+  if (!s->owed || s->tick_busy || (vm1.pending & 1) || vm_hold || pic_isr())
+    return 0;
+  s->owed--;
+  s->tick_busy = 1;
+  s->tick_since = tnow();
+  return 1;
+}
+
+void vm_tick_done(void)
+{
+  ses[cur].tick_busy = 0;
+}
+
 uint32_t vm_ticks(void)
 {
-  return ticks;
+  return tnow();
 }
 
 /* does the running session own the display? */
@@ -316,12 +363,14 @@ static int switchable(const struct frame *f, uint16_t isr_ignore)
 
   /* inside the BIOS disk service (unless that call is 20 seconds old:
      then the program has left it some other way) */
-  if (ses[cur].inbios && ticks - ses[cur].inbios_since < 20 * 18)
+  if (ses[cur].inbios && tnow() - ses[cur].inbios_since < 20 * 18)
     return 0;
   /* nor inside its keyboard interrupt handler: as with a real interrupt
      in service (below). A BIOS may run its interrupt handlers on one stack
      of its own (SeaBIOS), which two sessions must not be on at once. */
-  if (ses[cur].kbd_busy && ticks - ses[cur].kbd_since <= 9)
+  if (ses[cur].kbd_busy && tnow() - ses[cur].kbd_since <= 9)
+    return 0;
+  if (ses[cur].tick_busy && tnow() - ses[cur].tick_since <= 9)
     return 0;
   return ifl && !vm_hold && !crit && !(pic_isr() & ~isr_ignore);
 }
@@ -340,10 +389,10 @@ int vm_bios_call(uint8_t vec)
 
   if (!flat || vec < 0x10 || vec > 0x1a || vec == 0x18 || vec == 0x19)
     return 0;
-  if (s->inbios && ticks - s->inbios_since >= 20 * 18)
+  if (s->inbios && tnow() - s->inbios_since >= 20 * 18)
     s->inbios = 0;                      /* old calls that were abandoned */
   if (!s->inbios++)
-    s->inbios_since = ticks;
+    s->inbios_since = tnow();
   return 1;
 }
 
@@ -390,7 +439,7 @@ static void kbd_inject(struct frame *f)
   struct session *s = &ses[cur];
   int pm = !(f->eflags & EFL_VM);
 
-  if (s->kbd_busy && ticks - s->kbd_since > 9)
+  if (s->kbd_busy && tnow() - s->kbd_since > 9)
     s->kbd_busy = 0;
   if (vm_hold || s->kq_head == s->kq_tail || s->kbd_busy || latch_ok() || pic_isr())
     return;
@@ -399,9 +448,9 @@ static void kbd_inject(struct frame *f)
   latch = s->kq[s->kq_head];
   s->kq_head = (s->kq_head + 1) % KQ_SIZE;
   latch_valid = 1;
-  latch_tick = ticks;
+  latch_tick = tnow();
   s->kbd_busy = 1;
-  s->kbd_since = ticks;
+  s->kbd_since = tnow();
   if (pm)
     dpmi_irq(f, 1);                     /* does not return */
   if (dpmi_irq_v86(f, 1))               /* a client's own handler */
@@ -425,7 +474,7 @@ static struct frame next_frame;
 static void __attribute__((noreturn)) switch_to(struct frame *f, int n, int save)
 {
   struct session *a = &ses[cur], *b = &ses[n];
-  uint32_t missed, *bios_ticks;
+  uint32_t missed;
 
   if (save)
   {
@@ -433,7 +482,7 @@ static void __attribute__((noreturn)) switch_to(struct frame *f, int n, int save
     a->vif = vm1.vif;
     a->vflags = vm1.vflags;
     a->crit = crit;
-    a->tick_mark = ticks;
+    a->tick_mark = tnow();
     inst_copy(a, 1);
   }
   if (vm_trace)
@@ -454,20 +503,17 @@ static void __attribute__((noreturn)) switch_to(struct frame *f, int n, int save
   vm1.vflags = b->vflags;
   crit = b->crit;
   want = -1;
-  slice = 0;
+  slice_start = tnow();
 
-  /* timer ticks this session missed while it was not running */
-  missed = ticks - b->tick_mark;
-  bios_ticks = rm_ptr(0x40, 0x6c);
+  /* The timer ticks this session missed while it was not running: it gets
+     them now, one timer interrupt after the other (vm_owed_tick) - its
+     clock, and what the programs in it hang on the timer, keep time. At
+     most two seconds' worth. */
+  missed = tnow() - b->tick_mark;
   if (missed > 1)
-  {
-    *bios_ticks += missed - 1;
-    if (*bios_ticks >= 0x1800b0)
-    {
-      *bios_ticks -= 0x1800b0;
-      *(uint8_t *)rm_ptr(0x40, 0x70) = 1;
-    }
-  }
+    b->owed += missed - 1;
+  if (b->owed > 36)
+    b->owed = 36;
 
   /* not into *f: a trap frame from protected mode is 16 bytes shorter
      than struct frame (no V86 segment registers), at the top of the stack */
@@ -497,7 +543,7 @@ void vm_tick(struct frame *f)
     return;
   if (want == cur || (want >= 0 && !ses[want].used))
     want = -1;                          /* nothing to switch to */
-  if (++slice >= SLICE_TICKS && want < 0)
+  if (tnow() - slice_start >= SLICE_TICKS && want < 0)
     want = next_session();
   if (want >= 0 && want != cur && ses[want].used && switchable(f, 1))
     switch_to(f, want, 1);
@@ -584,6 +630,8 @@ int vm_kbd(struct frame *f, int inject)
     s->kq[s->kq_tail] = sc;
     s->kq_tail = next;
   }
+  else
+    kprintf("kbd: session %d does not take its keystrokes, scancode %02x dropped\n", focus, sc);
   if (focus != cur && nsessions > 1)
     want = focus;
   else if (inject)
@@ -614,6 +662,8 @@ void vm_key(uint8_t sc)
     s->kq[s->kq_tail] = sc;
     s->kq_tail = next;
   }
+  else
+    kprintf("kbd: session %d does not take its keystrokes, scancode %02x dropped\n", focus, sc);
   if (focus != cur && nsessions > 1)
     want = focus;
 }
@@ -624,6 +674,12 @@ int vm_key_pending(void)
   return ses[cur].kq_head != ses[cur].kq_tail;
 }
 
+/* does the monitor take the scancodes from the controller itself? */
+int vm_kbd_owned(void)
+{
+  return registered;
+}
+
 int vm_port60_waiting(void)
 {
   return latch_ok();
@@ -632,11 +688,23 @@ int vm_port60_waiting(void)
 /* port 60h read by a session: replay the latched scancode once */
 int vm_port60(uint8_t *v)
 {
-  if (!latch_ok())
-    return 0;
-  *v = latch;
-  latch_valid = 0;
-  return 1;
+  if (latch_ok())
+  {
+    *v = latch;
+    latch_valid = 0;
+    last_scancode = latch;
+    return 1;
+  }
+  /* No new scancode: as with the controller itself, port 60h still reads
+     the last one - keyboard handlers of games read it more than once -
+     unless the controller has a byte to give: the mouse's, or the
+     keyboard's answer to a command the BIOS sent it. */
+  if (registered && !(inb(0x64) & 1))
+  {
+    *v = last_scancode;
+    return 1;
+  }
+  return 0;
 }
 
 /* ---------------------------------------------------------------- */
@@ -713,7 +781,7 @@ static void vm_fork(struct frame *f)
   s->vif = vm1.vif;
   s->vflags = vm1.vflags;
   s->crit = 0;
-  s->tick_mark = ticks;
+  s->tick_mark = tnow();
   s->used = 1;
   nsessions++;
   kprintf("vm: session %d started (%u sessions)\n", n, nsessions);

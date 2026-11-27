@@ -136,6 +136,14 @@ void v86_deliver(struct frame *f)
   static const uint8_t prio[16] = { 0, 1, 8, 9, 10, 11, 12, 13, 14, 15, 3, 4, 5, 6, 7, 2 };
   int i;
 
+  if (vm1.vif && !vm1.pending && vm_owed_tick())
+  {
+    /* a tick it missed: to a DPMI client's own handler if it has one,
+       else to the real mode one; the monitor hears of the return */
+    if (!dpmi_irq_v86(f, 0))
+      v86_reflect_bp(f, 0x08, BP_TICK);
+    return;
+  }
   if (!vm1.vif || !vm1.pending)
     return;
   for (i = 0; i < 16; i++)
@@ -415,6 +423,10 @@ static void io_out(uint16_t port, int size, uint32_t v)
       }
       if ((v & 0xff) == 0xdd || (v & 0xff) == 0xdf)
         return;                 /* A20 disable/enable commands */
+      if (((v & 0xff) == 0xad || (v & 0xff) == 0xae) && vm_kbd_owned())
+        return;                 /* keyboard off/on, as BIOS keyboard handlers
+                                   do around their work: the keyboard side of
+                                   the controller is the monitor's (vm_kbd) */
       break;
     case 0x60:
       if (kbc_output_port)
@@ -557,14 +569,30 @@ static void v86_gp(struct frame *f)
       {
         if (ip - boot.stub_bp == BP_INT13)
         {
+          /* back from a BIOS service. As at an IRET: interrupts that came
+             while the handler had them off are due now. (Without this a
+             timer interrupt that arrived inside the BIOS stayed pending -
+             and in service at the interrupt controller, so no other came
+             - until the program's next IRET or STI: a loop that only reads
+             the time through the BIOS waited forever.) */
           v86_bp_return(f, 0);
           vm_bios_done();
+          v86_deliver(f);
+          vm_poll(f);
+        }
+        else if (ip - boot.stub_bp == BP_TICK)
+        {
+          v86_bp_return(f, 1);
+          vm_tick_done();
+          v86_deliver(f);
+          vm_poll(f);
         }
         else if (ip - boot.stub_bp == BP_KBD)
         {
           v86_bp_return(f, 1);
           vm_kbd_done();
-          vm_kbd_next(f);
+          v86_deliver(f);
+          vm_poll(f);                   /* with the next keystroke, if one waits */
         }
         else
           dpmi_v86_bp(f, ip - boot.stub_bp);

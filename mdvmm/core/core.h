@@ -157,8 +157,11 @@ void dpmi_hwirq(struct frame *f, int irq);
 #define MAX_SESSIONS  4
 int vm_current(void);
 int vm_port60_waiting(void);
+int vm_kbd_owned(void);
 void vm_kbd_done(void);                 /* a session's keyboard handler returned */
 void vm_kbd_next(struct frame *f);      /* give the session its next keystroke */
+int vm_owed_tick(void);
+void vm_tick_done(void);
 uint32_t vm_ticks(void);                /* timer ticks since the start */
 /* vga.c: VGA mode 13h on the UEFI framebuffer (stubs on DOS boots) */
 void bios_program_end(void);
