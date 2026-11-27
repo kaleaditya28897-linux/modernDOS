@@ -182,7 +182,12 @@ static void halt(struct frame *f)
     vm_poll(f);                 /* a queued keystroke wakes it up */
     return;
   }
-  vm_yield(f);                  /* another session may run instead */
+  {
+    uint16_t at = (uint16_t)f->eip, cs = (uint16_t)f->cs;
+    vm_yield(f);                /* another session may run instead */
+    if ((uint16_t)f->eip != at || (uint16_t)f->cs != cs)
+      return;                   /* it waited itself and an interrupt came: its handler runs */
+  }
   while (!(vm1.vif && (vm1.pending || vm_key_pending())))
     __asm__ volatile("sti; hlt; cli" ::: "memory");
   v86_deliver(f);
@@ -373,6 +378,7 @@ int v86_intercept(struct frame *f, uint8_t vec)
 /* ---------------------------------------------------------------- */
 /* port I/O                                                         */
 
+static uint16_t disk_call_ax, disk_call_dx;      /* the last INT 13h call reflected */
 static int kbc_output_port;      /* next 60h write is KBC output port data */
 
 static uint32_t io_in(uint16_t port, int size)
@@ -549,7 +555,14 @@ static void v86_gp(struct frame *f)
           return;
         }
         if (vm_bios_call(vec))
+        {
+          if (vec == 0x13)
+          {
+            disk_call_ax = AX(f);       /* for the log, should it fail */
+            disk_call_dx = DX(f);
+          }
           v86_reflect_bp(f, vec, BP_INT13);
+        }
         else
           v86_reflect(f, vec);
       }
@@ -577,6 +590,15 @@ static void v86_gp(struct frame *f)
              the time through the BIOS waited forever.) */
           v86_bp_return(f, 0);
           vm_bios_done();
+          /* a failed disk call of the machine's BIOS is worth a line in the
+             log (not the questions programs ask it: drive parameters, ...) */
+          {
+            uint8_t fn = (uint8_t)(disk_call_ax >> 8);
+            if ((fn == 2 || fn == 3 || fn == 0x42 || fn == 0x43) && ((f->eflags & EFL_CF) || (AX(f) >> 8)))
+              kprintf("bios: INT 13h AX=%04x DL=%02x failed: AX=%04x, carry %u\n", disk_call_ax,
+                      disk_call_dx & 0xff, AX(f), (unsigned)(f->eflags & EFL_CF));
+          }
+          disk_call_ax = 0;
           v86_deliver(f);
           vm_poll(f);
         }

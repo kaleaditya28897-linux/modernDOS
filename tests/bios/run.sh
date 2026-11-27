@@ -57,8 +57,11 @@ for i in range(5):
     print("       cpu: " + " ".join(x for x in d.split() if x.startswith(("EIP=", "EFL=", "ESP=", "EAX=", "CR0="))) +
           " | " + " ; ".join(l[:14] for l in d.split("\n") if l.startswith(("CS ", "SS "))))
 PY
-  timeout 30 ssh "${OPTS[@]}" dos@127.0.0.1 'MDLOG /N' > /dev/null 2>&1 || true    # the sessions' state to the log
-  grep -a "PANIC\|^kbd: \|^v86: a program\|vm: session\|^vm:   screen" -A5 debug.log | tail -30 | sed 's/^/       monitor: /'
+  # the sessions' state to the log: Ctrl+Alt+F12, three times a second apart
+  python3 -c 'import socket,time
+for i in range(3):
+    s=socket.socket(socket.AF_UNIX); s.connect("mon.sock"); s.sendall(b"sendkey ctrl-alt-f12\n"); time.sleep(1.2); s.close()' 2>/dev/null || true
+  grep -a "PANIC\|^kbd: \|^bios: INT\|^v86: a program\|vm: session\|^vm:   screen" debug.log | tail -40 | sed 's/^/       monitor: /'
 }
 boot() {   # boot name qemu-args...: wait for the SSH server
   local name=$1 i; shift

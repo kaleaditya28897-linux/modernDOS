@@ -34,6 +34,7 @@ struct session {
   uint32_t vram[VRAM_PAGES];            /* shadow video pages */
   uint32_t inst;                        /* linear address of instance copy */
   uint32_t tick_mark;
+  int idle;                             /* gave up the CPU since the last timer tick */
   uint32_t owed;                        /* timer ticks it missed and still gets */
   int tick_busy;                        /* the handler of one of those runs */
   uint32_t tick_since;
@@ -349,8 +350,9 @@ void vm_debug(void)
       continue;
     b = bda(n);
     if (n == cur)
-      kprintf("vm: session %d runs (asking); focus %d, in DOS %04x, crit %u\n", n, focus,
-              indos_lin ? *(const uint16_t *)(indos_lin - 1 + 0x10) : 0, crit);
+      kprintf("vm: session %d runs; focus %d, PSP %04x, crit %u, in BIOS %d, kbd busy %d, tick busy %d, "
+              "DPMI client %d\n", n, focus, indos_lin ? *(const uint16_t *)(indos_lin - 1 + 0x10) : 0, crit,
+              s->inbios, s->kbd_busy, s->tick_busy, dpmi_active());
     else
       kprintf("vm: session %d at %04x:%04x %s ss:sp %04x:%04x if %u, job %d, in BIOS %d, kbd busy %d, "
               "tick busy %d, owed %u, crit %u, keys %u\n", n, s->f.cs, (uint16_t)s->f.eip,
@@ -579,9 +581,13 @@ void vm_poll(struct frame *f)
 /* timer interrupt (IRQ0 pending, not yet delivered) */
 void vm_tick(struct frame *f)
 {
+  int n;
+
   ticks++;
   if (nsessions < 2)
     return;
+  for (n = 0; n < MAX_SESSIONS; n++)
+    ses[n].idle = 0;                    /* a new tick: every session gets a look */
   if (want == cur || (want >= 0 && !ses[want].used))
     want = -1;                          /* nothing to switch to */
   if (tnow() - slice_start >= SLICE_TICKS && want < 0)
@@ -593,10 +599,41 @@ void vm_tick(struct frame *f)
 /* the running session gives up the CPU (idle, HLT) */
 void vm_yield(struct frame *f)
 {
+  int i, n;
+
   if (nsessions < 2)
     return;
+  /* To a session that has not given up the CPU itself since the last
+     timer tick. If all have, nobody has work: the CPU rests until the next
+     interrupt instead of going round the idle sessions (on DOS boots every
+     switch copies the sessions' memory). */
+  ses[cur].idle = 1;
   if (want < 0)
-    want = next_session();
+    for (i = 1; i < MAX_SESSIONS; i++)
+    {
+      n = (cur + i) % MAX_SESSIONS;
+      if (ses[n].used && !ses[n].idle)
+      {
+        want = n;
+        break;
+      }
+    }
+  if (want < 0)
+  {
+    if (vm_hold)
+      return;                           /* (not a live frame: a DPMI host call) */
+    if ((f->eflags & EFL_VM) && vm1.vif && !vm1.pending && !vm_key_pending())
+    {
+      __asm__ volatile("sti; hlt; cli" ::: "memory");
+      /* something happened (a timer tick is not counted while the monitor
+         itself waits): every session gets a look again */
+      for (n = 0; n < MAX_SESSIONS; n++)
+        ses[n].idle = 0;
+      v86_deliver(f);                   /* what woke the CPU */
+    }
+    kbd_inject(f);
+    return;
+  }
   vm_poll(f);
 }
 
@@ -662,6 +699,11 @@ int vm_kbd(struct frame *f, int inject)
   if (kbd_ctrl && kbd_alt && sc >= 0x3b && sc <= 0x3e)    /* F1..F4 */
   {
     set_focus(sc - 0x3b);
+    return 1;
+  }
+  if (kbd_ctrl && kbd_alt && sc == 0x58)                  /* F12: the sessions' state to the log */
+  {
+    vm_debug();
     return 1;
   }
   s = &ses[focus];
